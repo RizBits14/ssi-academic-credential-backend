@@ -45,6 +45,13 @@ enum AcademicRecordStatus {
   INVALID
 }
 
+enum CredentialStatus {
+  ACTIVE
+  SUSPENDED
+  REVOKED
+  EXPIRED
+}
+
 model User {
   id           String   @id @default(uuid())
   name         String
@@ -55,6 +62,8 @@ model User {
   refreshTokens           RefreshToken[]
   organizationMemberships OrganizationMember[]
   academicRecords         AcademicRecord[]
+  credentials             Credential[]
+  walletCredentials       WalletCredential[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -86,6 +95,7 @@ model Organization {
   members           OrganizationMember[]
   academicRecords   AcademicRecord[]
   credentialSchemas CredentialSchema[]
+  issuedCredentials Credential[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -140,6 +150,8 @@ model AcademicRecord {
   graduationDate DateTime?
   status         AcademicRecordStatus @default(ACTIVE)
 
+  credentials Credential[]
+
   university Organization @relation(fields: [universityId], references: [id], onDelete: Restrict)
   holder     User         @relation(fields: [holderId], references: [id], onDelete: Restrict)
 
@@ -163,10 +175,60 @@ model CredentialSchema {
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
 
+  credentials Credential[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@unique([organizationId, name, version])
   @@index([organizationId])
   @@index([status])
+}
+
+model Credential {
+  id                   String           @id @default(uuid())
+  vcId                 String           @unique
+  issuerOrganizationId String
+  issuerDid            String
+  holderId             String
+  holderDid            String
+  schemaId             String
+  academicRecordId     String
+  credentialHash       String
+  status               CredentialStatus @default(ACTIVE)
+  issuedAt             DateTime
+  expiresAt            DateTime?
+
+  issuerOrganization Organization      @relation(fields: [issuerOrganizationId], references: [id], onDelete: Restrict)
+  holder             User              @relation(fields: [holderId], references: [id], onDelete: Restrict)
+  schema             CredentialSchema  @relation(fields: [schemaId], references: [id], onDelete: Restrict)
+  academicRecord     AcademicRecord    @relation(fields: [academicRecordId], references: [id], onDelete: Restrict)
+  walletCredential   WalletCredential?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([issuerOrganizationId])
+  @@index([holderId])
+  @@index([schemaId])
+  @@index([academicRecordId])
+  @@index([status])
+}
+
+model WalletCredential {
+  id           String @id @default(uuid())
+  holderId     String
+  credentialId String @unique
+
+  ciphertext String
+  iv         String
+  authTag    String
+
+  holder     User       @relation(fields: [holderId], references: [id], onDelete: Restrict)
+  credential Credential @relation(fields: [credentialId], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([holderId])
 }
