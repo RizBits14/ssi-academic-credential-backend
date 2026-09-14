@@ -38,6 +38,13 @@ enum DidStatus {
   REVOKED
 }
 
+enum AcademicRecordStatus {
+  ACTIVE
+  GRADUATED
+  WITHDRAWN
+  INVALID
+}
+
 model User {
   id           String   @id @default(uuid())
   name         String
@@ -47,6 +54,7 @@ model User {
 
   refreshTokens           RefreshToken[]
   organizationMemberships OrganizationMember[]
+  academicRecords         AcademicRecord[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -75,7 +83,8 @@ model Organization {
   website String?
   status  OrganizationStatus @default(ACTIVE)
 
-  members OrganizationMember[]
+  members         OrganizationMember[]
+  academicRecords AcademicRecord[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -113,5 +122,31 @@ model Did {
   updatedAt DateTime @updatedAt
 
   @@index([ownerType, ownerId])
+  @@index([status])
+}
+
+model AcademicRecord {
+  id             String               @id @default(uuid())
+  universityId   String
+  holderId       String
+  studentId      String
+  fullName       String
+  degree         String
+  department     String?
+  major          String
+  cgpa           Decimal?
+  graduationYear Int
+  graduationDate DateTime?
+  status         AcademicRecordStatus @default(ACTIVE)
+
+  university Organization @relation(fields: [universityId], references: [id], onDelete: Restrict)
+  holder     User         @relation(fields: [holderId], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([universityId, studentId])
+  @@index([universityId])
+  @@index([holderId])
   @@index([status])
 }
