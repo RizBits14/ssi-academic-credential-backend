@@ -39,4 +39,19 @@ export class RefreshTokenService {
 
     return result.count === 1;
   }
+
+  async revokeToken(token: string, userId: string): Promise<void> {
+    const tokenHash = this.hashToken(token);
+
+    await this.prisma.refreshToken.updateMany({
+      where: {
+        tokenHash,
+        userId,
+        revokedAt: null,
+      },
+      data: {
+        revokedAt: new Date(),
+      },
+    });
+  }
 }

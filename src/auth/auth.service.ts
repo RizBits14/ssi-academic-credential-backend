@@ -146,4 +146,8 @@ export class AuthService {
       refreshToken,
     };
   }
+
+  async logout(userId: string, dto: RefreshTokenDto): Promise<void> {
+    await this.refreshTokenService.revokeToken(dto.refreshToken, userId);
+  }
 }

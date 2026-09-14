@@ -42,4 +42,14 @@ export class AuthController {
   me(@Req() request: AuthenticatedRequest) {
     return request.user;
   }
+
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Post('logout')
+  async logout(
+    @Req() request: AuthenticatedRequest,
+    @Body() dto: RefreshTokenDto,
+  ) {
+    await this.authService.logout(request.user.sub, dto);
+  }
 }
