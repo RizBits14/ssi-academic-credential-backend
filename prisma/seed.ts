@@ -145,10 +145,28 @@ async function main() {
     },
   });
 
+  const holder = await prisma.user.upsert({
+    where: {
+      email: 'applicant@example.com',
+    },
+    update: {
+      name: 'Sample Applicant',
+      passwordHash,
+      role: UserRole.HOLDER,
+    },
+    create: {
+      name: 'Sample Applicant',
+      email: 'applicant@example.com',
+      passwordHash,
+      role: UserRole.HOLDER,
+    },
+  });
+
   console.log('Database seed completed successfully.');
   console.log(`System admin: ${systemAdmin.email}`);
   console.log(`Issuer admin: ${issuerAdmin.email}`);
   console.log(`Verifier admin: ${verifierAdmin.email}`);
+  console.log(`Holder: ${holder.email}`);
 }
 
 main()
