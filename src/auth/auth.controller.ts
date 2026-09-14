@@ -15,6 +15,9 @@ import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { RegisterDto } from './dto/register.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import type { AuthenticatedRequest } from './guards/jwt-auth.guard';
+import { UserRole } from '../generated/prisma/enums';
+import { Roles } from '../common/decorators/roles.decorator';
+import { RolesGuard } from '../common/guards/roles.guard';
 
 @Controller('auth')
 export class AuthController {
@@ -51,5 +54,23 @@ export class AuthController {
     @Body() dto: RefreshTokenDto,
   ) {
     await this.authService.logout(request.user.sub, dto);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.HOLDER)
+  @Get('rbac/holder')
+  holderOnly() {
+    return {
+      message: 'Holder access granted',
+    };
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ISSUER_ADMIN)
+  @Get('rbac/issuer')
+  issuerOnly() {
+    return {
+      message: 'Issuer access granted',
+    };
   }
 }
