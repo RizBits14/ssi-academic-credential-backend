@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
+import { EncryptionService } from '../crypto/encryption.service';
 import { HashingService } from '../crypto/hashing.service';
 import { DidService } from '../did/did.service';
 
@@ -27,6 +28,7 @@ export class CredentialsService {
   constructor(
     private readonly hashingService: HashingService,
     private readonly didService: DidService,
+    private readonly encryptionService: EncryptionService,
   ) {}
 
   buildUnsignedAcademicCredential(input: BuildAcademicCredentialInput) {
@@ -79,6 +81,12 @@ export class CredentialsService {
         proofValue: signingResult.signature,
       },
     };
+  }
+
+  encryptCredentialForWallet(signedCredential: Record<string, unknown>) {
+    const plaintext = JSON.stringify(signedCredential);
+
+    return this.encryptionService.encrypt(plaintext);
   }
 
   canonicalize(value: unknown): string {

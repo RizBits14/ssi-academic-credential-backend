@@ -1,4 +1,5 @@
 import { describe, expect, it, jest } from '@jest/globals';
+import { EncryptionService } from '../crypto/encryption.service';
 import { HashingService } from '../crypto/hashing.service';
 import { DidService } from '../did/did.service';
 import { CredentialsService } from './credentials.service';
@@ -10,9 +11,20 @@ describe('CredentialsService', () => {
     signForOrganization: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
   };
 
+  const mockEncryptionService = {
+    encrypt: jest.fn<
+      (...args: unknown[]) => {
+        ciphertext: string;
+        iv: string;
+        authTag: string;
+      }
+    >(),
+  };
+
   const service = new CredentialsService(
     hashingService,
     mockDidService as unknown as DidService,
+    mockEncryptionService as unknown as EncryptionService,
   );
 
   it('should build an unsigned academic credential', () => {
@@ -140,6 +152,39 @@ describe('CredentialsService', () => {
       created: '2026-09-15T00:00:00.000Z',
       verificationMethod: 'did:mock:university:123#key-1',
       proofValue: 'base64-signature',
+    });
+  });
+
+  it('should encrypt the signed credential for wallet storage', () => {
+    const signedCredential = {
+      id: 'urn:uuid:test',
+      type: ['VerifiableCredential', 'AcademicCredential'],
+      credentialSubject: {
+        studentId: '20260001',
+        cgpa: 3.75,
+      },
+      proof: {
+        type: 'Ed25519Signature',
+        proofValue: 'base64-signature',
+      },
+    };
+
+    mockEncryptionService.encrypt.mockReturnValue({
+      ciphertext: 'encrypted-credential',
+      iv: 'test-iv',
+      authTag: 'test-auth-tag',
+    });
+
+    const result = service.encryptCredentialForWallet(signedCredential);
+
+    expect(mockEncryptionService.encrypt).toHaveBeenCalledWith(
+      JSON.stringify(signedCredential),
+    );
+
+    expect(result).toEqual({
+      ciphertext: 'encrypted-credential',
+      iv: 'test-iv',
+      authTag: 'test-auth-tag',
     });
   });
 });
