@@ -1,0 +1,86 @@
+import {
+  Body,
+  Controller,
+  Get,
+  NotFoundException,
+  Param,
+  Post,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
+
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import type { AuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
+import { Roles } from '../common/decorators/roles.decorator';
+import { RolesGuard } from '../common/guards/roles.guard';
+import { OrganizationType, UserRole } from '../generated/prisma/enums';
+import { OrganizationsService } from '../organizations/organizations.service';
+import { AcademicRecordsService } from './academic-records.service';
+import { CreateAcademicRecordDto } from './dto/create-academic-record.dto';
+
+@Controller('academic-records')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(UserRole.ISSUER_ADMIN)
+export class AcademicRecordsController {
+  constructor(
+    private readonly academicRecordsService: AcademicRecordsService,
+    private readonly organizationsService: OrganizationsService,
+  ) {}
+
+  @Post()
+  async create(
+    @Req() request: AuthenticatedRequest,
+    @Body() dto: CreateAcademicRecordDto,
+  ) {
+    const universityId = await this.getUniversityId(request.user.sub);
+
+    return this.academicRecordsService.create({
+      universityId,
+      holderId: dto.holderId,
+      studentId: dto.studentId,
+      fullName: dto.fullName,
+      degree: dto.degree,
+      department: dto.department,
+      major: dto.major,
+      cgpa: dto.cgpa,
+      graduationYear: dto.graduationYear,
+      graduationDate: dto.graduationDate
+        ? new Date(dto.graduationDate)
+        : undefined,
+    });
+  }
+
+  @Get()
+  async findAll(@Req() request: AuthenticatedRequest) {
+    const universityId = await this.getUniversityId(request.user.sub);
+
+    return this.academicRecordsService.findByUniversity(universityId);
+  }
+
+  @Get(':id')
+  async findOne(@Req() request: AuthenticatedRequest, @Param('id') id: string) {
+    const universityId = await this.getUniversityId(request.user.sub);
+
+    const record = await this.academicRecordsService.findById(id);
+
+    if (record.universityId !== universityId) {
+      throw new NotFoundException('Academic record not found');
+    }
+
+    return record;
+  }
+
+  private async getUniversityId(userId: string): Promise<string> {
+    const membership =
+      await this.organizationsService.findMembershipForUser(userId);
+
+    if (
+      !membership ||
+      membership.organization.type !== OrganizationType.UNIVERSITY
+    ) {
+      throw new NotFoundException('University membership not found');
+    }
+
+    return membership.organization.id;
+  }
+}

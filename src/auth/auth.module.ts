@@ -1,13 +1,13 @@
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
+import { RolesGuard } from '../common/guards/roles.guard';
 import { UsersModule } from '../users/users.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
+import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { PasswordService } from './password.service';
 import { RefreshTokenService } from './refresh-token.service';
-import { JwtAuthGuard } from './guards/jwt-auth.guard';
-import { RolesGuard } from '../common/guards/roles.guard';
 
 @Module({
   imports: [
@@ -30,6 +30,6 @@ import { RolesGuard } from '../common/guards/roles.guard';
     JwtAuthGuard,
     RolesGuard,
   ],
-  exports: [AuthService],
+  exports: [AuthService, JwtModule, JwtAuthGuard, RolesGuard],
 })
 export class AuthModule {}
