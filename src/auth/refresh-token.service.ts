@@ -19,4 +19,24 @@ export class RefreshTokenService {
       },
     });
   }
+
+  async consumeToken(token: string, userId: string): Promise<boolean> {
+    const tokenHash = this.hashToken(token);
+
+    const result = await this.prisma.refreshToken.updateMany({
+      where: {
+        tokenHash,
+        userId,
+        revokedAt: null,
+        expiresAt: {
+          gt: new Date(),
+        },
+      },
+      data: {
+        revokedAt: new Date(),
+      },
+    });
+
+    return result.count === 1;
+  }
 }

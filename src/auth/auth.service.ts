@@ -8,9 +8,16 @@ import { JwtService } from '@nestjs/jwt';
 import { UserRole } from '../generated/prisma/enums';
 import { UsersService } from '../users/users.service';
 import { LoginDto } from './dto/login.dto';
+import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { RegisterDto } from './dto/register.dto';
 import { PasswordService } from './password.service';
 import { RefreshTokenService } from './refresh-token.service';
+
+interface RefreshTokenPayload {
+  sub: string;
+  email: string;
+  role: UserRole;
+}
 
 @Injectable()
 export class AuthService {
@@ -63,10 +70,58 @@ export class AuthService {
       throw new UnauthorizedException('Invalid email or password');
     }
 
+    const tokens = await this.issueTokens(user.id, user.email, user.role);
+
+    return {
+      ...tokens,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+      },
+    };
+  }
+
+  async refresh(dto: RefreshTokenDto) {
+    let payload: RefreshTokenPayload;
+
+    try {
+      payload = await this.jwtService.verifyAsync<RefreshTokenPayload>(
+        dto.refreshToken,
+        {
+          secret: this.configService.getOrThrow<string>('JWT_REFRESH_SECRET'),
+        },
+      );
+    } catch {
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+
+    const user = await this.usersService.findById(payload.sub);
+
+    if (!user) {
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+
+    const tokenConsumed = await this.refreshTokenService.consumeToken(
+      dto.refreshToken,
+      user.id,
+    );
+
+    if (!tokenConsumed) {
+      throw new UnauthorizedException(
+        'Refresh token has expired or already been used',
+      );
+    }
+
+    return this.issueTokens(user.id, user.email, user.role);
+  }
+
+  private async issueTokens(userId: string, email: string, role: UserRole) {
     const payload = {
-      sub: user.id,
-      email: user.email,
-      role: user.role,
+      sub: userId,
+      email,
+      role,
     };
 
     const accessToken = await this.jwtService.signAsync(payload);
@@ -81,7 +136,7 @@ export class AuthService {
     );
 
     await this.refreshTokenService.storeToken(
-      user.id,
+      userId,
       refreshToken,
       refreshTokenExpiresAt,
     );
@@ -89,12 +144,6 @@ export class AuthService {
     return {
       accessToken,
       refreshToken,
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-      },
     };
   }
 }
