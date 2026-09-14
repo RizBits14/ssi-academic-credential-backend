@@ -7,6 +7,7 @@ import {
   Post,
   Req,
   UseGuards,
+  Patch,
 } from '@nestjs/common';
 
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -17,6 +18,7 @@ import { OrganizationType, UserRole } from '../generated/prisma/enums';
 import { OrganizationsService } from '../organizations/organizations.service';
 import { AcademicRecordsService } from './academic-records.service';
 import { CreateAcademicRecordDto } from './dto/create-academic-record.dto';
+import { UpdateAcademicRecordDto } from './dto/update-academic-record.dto';
 
 @Controller('academic-records')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -82,5 +84,33 @@ export class AcademicRecordsController {
     }
 
     return membership.organization.id;
+  }
+
+  @Patch(':id')
+  async update(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') id: string,
+    @Body() dto: UpdateAcademicRecordDto,
+  ) {
+    const universityId = await this.getUniversityId(request.user.sub);
+
+    const record = await this.academicRecordsService.findById(id);
+
+    if (record.universityId !== universityId) {
+      throw new NotFoundException('Academic record not found');
+    }
+
+    return this.academicRecordsService.update(id, {
+      fullName: dto.fullName,
+      degree: dto.degree,
+      department: dto.department,
+      major: dto.major,
+      cgpa: dto.cgpa,
+      graduationYear: dto.graduationYear,
+      graduationDate: dto.graduationDate
+        ? new Date(dto.graduationDate)
+        : undefined,
+      status: dto.status,
+    });
   }
 }

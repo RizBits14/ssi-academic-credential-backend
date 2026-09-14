@@ -68,4 +68,35 @@ describe('AcademicRecordsService', () => {
 
     expect(result).toEqual([]);
   });
+
+  it('should update an academic record', async () => {
+    const existingRecord = {
+      id: 'record-id',
+      universityId: 'university-id',
+      major: 'Computer Science',
+    };
+
+    const updatedRecord = {
+      ...existingRecord,
+      major: 'Software Engineering',
+    };
+
+    mockPrisma.academicRecord.findUnique.mockResolvedValue(existingRecord);
+    mockPrisma.academicRecord.update.mockResolvedValue(updatedRecord);
+
+    const result = await service.update('record-id', {
+      major: 'Software Engineering',
+    });
+
+    expect(mockPrisma.academicRecord.update).toHaveBeenCalledWith({
+      where: {
+        id: 'record-id',
+      },
+      data: {
+        major: 'Software Engineering',
+      },
+    });
+
+    expect(result).toEqual(updatedRecord);
+  });
 });
