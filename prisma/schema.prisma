@@ -16,6 +16,17 @@ enum UserRole {
   VERIFIER_ADMIN
 }
 
+enum OrganizationType {
+  UNIVERSITY
+  BANK
+}
+
+enum OrganizationStatus {
+  ACTIVE
+  SUSPENDED
+  DISABLED
+}
+
 model User {
   id           String   @id @default(uuid())
   name         String
@@ -23,7 +34,8 @@ model User {
   passwordHash String
   role         UserRole
 
-  refreshTokens RefreshToken[]
+  refreshTokens           RefreshToken[]
+  organizationMemberships OrganizationMember[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -40,5 +52,35 @@ model RefreshToken {
 
   createdAt DateTime @default(now())
 
+  @@index([userId])
+}
+
+model Organization {
+  id      String             @id @default(uuid())
+  name    String
+  slug    String             @unique
+  type    OrganizationType
+  email   String?
+  website String?
+  status  OrganizationStatus @default(ACTIVE)
+
+  members OrganizationMember[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model OrganizationMember {
+  id             String @id @default(uuid())
+  organizationId String
+  userId         String
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([organizationId, userId])
+  @@index([organizationId])
   @@index([userId])
 }
