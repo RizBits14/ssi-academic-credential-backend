@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { HashingService } from '../crypto/hashing.service';
+import { DidService } from '../did/did.service';
 
 interface BuildAcademicCredentialInput {
   issuerDid: string;
@@ -23,7 +24,10 @@ interface BuildAcademicCredentialInput {
 
 @Injectable()
 export class CredentialsService {
-  constructor(private readonly hashingService: HashingService) {}
+  constructor(
+    private readonly hashingService: HashingService,
+    private readonly didService: DidService,
+  ) {}
 
   buildUnsignedAcademicCredential(input: BuildAcademicCredentialInput) {
     return {
@@ -54,6 +58,29 @@ export class CredentialsService {
     };
   }
 
+  async addIssuerProof(
+    organizationId: string,
+    unsignedCredential: Record<string, unknown>,
+    createdAt: Date,
+  ) {
+    const canonicalCredential = this.canonicalize(unsignedCredential);
+
+    const signingResult = await this.didService.signForOrganization(
+      organizationId,
+      canonicalCredential,
+    );
+
+    return {
+      ...unsignedCredential,
+      proof: {
+        type: 'Ed25519Signature',
+        created: createdAt.toISOString(),
+        verificationMethod: `${signingResult.did}#key-${signingResult.keyVersion}`,
+        proofValue: signingResult.signature,
+      },
+    };
+  }
+
   canonicalize(value: unknown): string {
     return JSON.stringify(this.sortValue(value));
   }
@@ -76,6 +103,7 @@ export class CredentialsService {
         .sort()
         .reduce<Record<string, unknown>>((result, key) => {
           result[key] = this.sortValue(object[key]);
+
           return result;
         }, {});
     }

@@ -1,10 +1,19 @@
-import { describe, expect, it } from '@jest/globals';
+import { describe, expect, it, jest } from '@jest/globals';
 import { HashingService } from '../crypto/hashing.service';
+import { DidService } from '../did/did.service';
 import { CredentialsService } from './credentials.service';
 
 describe('CredentialsService', () => {
   const hashingService = new HashingService();
-  const service = new CredentialsService(hashingService);
+
+  const mockDidService = {
+    signForOrganization: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+  };
+
+  const service = new CredentialsService(
+    hashingService,
+    mockDidService as unknown as DidService,
+  );
 
   it('should build an unsigned academic credential', () => {
     const credential = service.buildUnsignedAcademicCredential({
@@ -97,5 +106,40 @@ describe('CredentialsService', () => {
     expect(service.hashCredential(original)).not.toBe(
       service.hashCredential(modified),
     );
+  });
+
+  it('should add an issuer proof to the credential', async () => {
+    mockDidService.signForOrganization.mockResolvedValue({
+      did: 'did:mock:university:123',
+      keyVersion: 1,
+      signature: 'base64-signature',
+    });
+
+    const unsignedCredential = {
+      id: 'urn:uuid:test',
+      type: ['VerifiableCredential', 'AcademicCredential'],
+      credentialSubject: {
+        studentId: '20260001',
+        cgpa: 3.75,
+      },
+    };
+
+    const result = await service.addIssuerProof(
+      'university-id',
+      unsignedCredential,
+      new Date('2026-09-15T00:00:00.000Z'),
+    );
+
+    expect(mockDidService.signForOrganization).toHaveBeenCalledWith(
+      'university-id',
+      service.canonicalize(unsignedCredential),
+    );
+
+    expect(result.proof).toEqual({
+      type: 'Ed25519Signature',
+      created: '2026-09-15T00:00:00.000Z',
+      verificationMethod: 'did:mock:university:123#key-1',
+      proofValue: 'base64-signature',
+    });
   });
 });

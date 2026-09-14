@@ -4,14 +4,14 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
+import { EncryptionService } from '../crypto/encryption.service';
+import { SignatureService } from '../crypto/signature.service';
 import {
   DidOwnerType,
   DidStatus,
   OrganizationType,
 } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
-import { EncryptionService } from '../crypto/encryption.service';
-import { SignatureService } from '../crypto/signature.service';
 
 @Injectable()
 export class DidService {
@@ -100,6 +100,35 @@ export class DidService {
         publicKey: record.publicKey,
       },
       status: record.status,
+    };
+  }
+
+  async signForOrganization(organizationId: string, data: string) {
+    const didRecord = await this.findByOwner(
+      DidOwnerType.ORGANIZATION,
+      organizationId,
+    );
+
+    if (!didRecord) {
+      throw new NotFoundException('Organization DID not found');
+    }
+
+    if (didRecord.status !== DidStatus.ACTIVE) {
+      throw new ConflictException('Organization DID is not active');
+    }
+
+    const privateKey = this.encryptionService.decrypt({
+      ciphertext: didRecord.encryptedPrivateKey,
+      iv: didRecord.iv,
+      authTag: didRecord.authTag,
+    });
+
+    const signature = this.signatureService.sign(data, privateKey);
+
+    return {
+      did: didRecord.did,
+      keyVersion: didRecord.keyVersion,
+      signature,
     };
   }
 
