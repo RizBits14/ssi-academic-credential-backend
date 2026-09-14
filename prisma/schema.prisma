@@ -83,8 +83,9 @@ model Organization {
   website String?
   status  OrganizationStatus @default(ACTIVE)
 
-  members         OrganizationMember[]
-  academicRecords AcademicRecord[]
+  members           OrganizationMember[]
+  academicRecords   AcademicRecord[]
+  credentialSchemas CredentialSchema[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -148,5 +149,24 @@ model AcademicRecord {
   @@unique([universityId, studentId])
   @@index([universityId])
   @@index([holderId])
+  @@index([status])
+}
+
+model CredentialSchema {
+  id             String  @id @default(uuid())
+  organizationId String
+  name           String
+  version        String
+  description    String?
+  schemaJson     Json
+  status         String  @default("ACTIVE")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organizationId, name, version])
+  @@index([organizationId])
   @@index([status])
 }
