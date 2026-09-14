@@ -8,7 +8,7 @@ import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
 import { UserRole } from '../../generated/prisma/enums';
 import type { AccessTokenPayload } from '../../auth/interfaces/access-token-payload.interface';
-import { ROLES_KEY } from '../../common/decorators/roles.decorator';
+import { ROLES_KEY } from '../decorators/roles.decorator';
 
 interface RequestWithUser extends Request {
   user?: AccessTokenPayload;

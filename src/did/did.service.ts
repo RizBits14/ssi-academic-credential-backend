@@ -84,6 +84,25 @@ export class DidService {
     });
   }
 
+  async resolveDid(did: string) {
+    const record = await this.findByDid(did);
+
+    if (!record) {
+      throw new NotFoundException('DID not found');
+    }
+
+    return {
+      id: record.did,
+      controller: record.ownerId,
+      verificationMethod: {
+        id: `${record.did}#key-${record.keyVersion}`,
+        type: 'Ed25519VerificationKey',
+        publicKey: record.publicKey,
+      },
+      status: record.status,
+    };
+  }
+
   private async createDid(
     ownerType: DidOwnerType,
     ownerId: string,
