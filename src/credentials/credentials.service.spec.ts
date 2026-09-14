@@ -1,0 +1,101 @@
+import { describe, expect, it } from '@jest/globals';
+import { HashingService } from '../crypto/hashing.service';
+import { CredentialsService } from './credentials.service';
+
+describe('CredentialsService', () => {
+  const hashingService = new HashingService();
+  const service = new CredentialsService(hashingService);
+
+  it('should build an unsigned academic credential', () => {
+    const credential = service.buildUnsignedAcademicCredential({
+      issuerDid: 'did:mock:university:123',
+      issuerName: 'Example University',
+      holderDid: 'did:mock:holder:456',
+      fullName: 'Sample Applicant',
+      studentId: '20260001',
+      degree: 'Bachelor of Science',
+      department: 'Computer Science and Engineering',
+      major: 'Computer Science',
+      cgpa: 3.75,
+      graduationYear: 2026,
+      schemaName: 'AcademicCredential',
+      schemaVersion: '1.0',
+      issuedAt: new Date('2026-09-15T00:00:00.000Z'),
+    });
+
+    expect(credential.id).toMatch(/^urn:uuid:/);
+
+    expect(credential.type).toEqual([
+      'VerifiableCredential',
+      'AcademicCredential',
+    ]);
+
+    expect(credential.issuer).toEqual({
+      id: 'did:mock:university:123',
+      name: 'Example University',
+    });
+
+    expect(credential.credentialSubject).toEqual(
+      expect.objectContaining({
+        id: 'did:mock:holder:456',
+        studentId: '20260001',
+        cgpa: 3.75,
+        graduationYear: 2026,
+      }),
+    );
+
+    expect(credential).not.toHaveProperty('proof');
+  });
+
+  it('should canonicalize objects deterministically', () => {
+    const first = {
+      z: 1,
+      a: {
+        y: 2,
+        b: 3,
+      },
+    };
+
+    const second = {
+      a: {
+        b: 3,
+        y: 2,
+      },
+      z: 1,
+    };
+
+    expect(service.canonicalize(first)).toBe(service.canonicalize(second));
+  });
+
+  it('should generate the same hash for equivalent objects', () => {
+    const first = {
+      degree: 'Bachelor of Science',
+      cgpa: 3.75,
+      studentId: '20260001',
+    };
+
+    const second = {
+      studentId: '20260001',
+      degree: 'Bachelor of Science',
+      cgpa: 3.75,
+    };
+
+    expect(service.hashCredential(first)).toBe(service.hashCredential(second));
+  });
+
+  it('should generate a different hash when credential data changes', () => {
+    const original = {
+      studentId: '20260001',
+      cgpa: 3.75,
+    };
+
+    const modified = {
+      studentId: '20260001',
+      cgpa: 4.0,
+    };
+
+    expect(service.hashCredential(original)).not.toBe(
+      service.hashCredential(modified),
+    );
+  });
+});

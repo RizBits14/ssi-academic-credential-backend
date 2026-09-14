@@ -9,6 +9,7 @@ import { CryptoModule } from './crypto/crypto.module';
 import { DidModule } from './did/did.module';
 import { AcademicRecordsModule } from './academic-records/academic-records.module';
 import { CredentialSchemasModule } from './credential-schemas/credential-schemas.module';
+import { CredentialsModule } from './credentials/credentials.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { CredentialSchemasModule } from './credential-schemas/credential-schemas
     DidModule,
     AcademicRecordsModule,
     CredentialSchemasModule,
+    CredentialsModule,
   ],
 })
 export class AppModule {}
