@@ -27,6 +27,17 @@ enum OrganizationStatus {
   DISABLED
 }
 
+enum DidOwnerType {
+  ORGANIZATION
+  USER
+}
+
+enum DidStatus {
+  ACTIVE
+  SUSPENDED
+  REVOKED
+}
+
 model User {
   id           String   @id @default(uuid())
   name         String
@@ -83,4 +94,24 @@ model OrganizationMember {
   @@unique([organizationId, userId])
   @@index([organizationId])
   @@index([userId])
+}
+
+model Did {
+  id                  String       @id @default(uuid())
+  did                 String       @unique
+  ownerType           DidOwnerType
+  ownerId             String
+  publicKey           String
+  encryptedPrivateKey String
+  iv                  String
+  authTag             String
+  algorithm           String       @default("Ed25519")
+  keyVersion          Int          @default(1)
+  status              DidStatus    @default(ACTIVE)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([ownerType, ownerId])
+  @@index([status])
 }
