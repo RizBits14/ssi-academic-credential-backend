@@ -6,6 +6,7 @@ import { CredentialSchemasModule } from '../credential-schemas/credential-schema
 import { DidModule } from '../did/did.module';
 import { OrganizationsModule } from '../organizations/organizations.module';
 import { CredentialIssuanceService } from './credential-issuance.service';
+import { CredentialStatusService } from './credential-status.service';
 import { CredentialsController } from './credentials.controller';
 import { CredentialsService } from './credentials.service';
 
@@ -18,7 +19,15 @@ import { CredentialsService } from './credentials.service';
     OrganizationsModule,
   ],
   controllers: [CredentialsController],
-  providers: [CredentialsService, CredentialIssuanceService],
-  exports: [CredentialsService, CredentialIssuanceService],
+  providers: [
+    CredentialsService,
+    CredentialIssuanceService,
+    CredentialStatusService,
+  ],
+  exports: [
+    CredentialsService,
+    CredentialIssuanceService,
+    CredentialStatusService,
+  ],
 })
 export class CredentialsModule {}
