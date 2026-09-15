@@ -105,6 +105,7 @@ model Organization {
   credentialSchemas          CredentialSchema[]
   issuedCredentials          Credential[]
   trustedIssuerRegistrations TrustedIssuer[]
+  jobs                       Job[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -281,4 +282,21 @@ model CredentialStatusHistory {
   @@index([changedBy])
   @@index([newStatus])
   @@index([createdAt])
+}
+
+model Job {
+  id             String  @id @default(uuid())
+  bankId         String
+  title          String
+  description    String?
+  requiredClaims Json
+  status         String  @default("OPEN")
+
+  bank Organization @relation(fields: [bankId], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([bankId])
+  @@index([status])
 }
