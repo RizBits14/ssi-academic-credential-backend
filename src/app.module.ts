@@ -16,6 +16,7 @@ import { TrustRegistryModule } from './trust-registry/trust-registry.module';
 import { JobsModule } from './jobs/jobs.module';
 import { ApplicationsModule } from './applications/applications.module';
 import { RedisModule } from './redis/redis.module';
+import { VerificationRequestsModule } from './verification-requests/verification-requests.module';
 
 @Module({
   imports: [
@@ -37,6 +38,7 @@ import { RedisModule } from './redis/redis.module';
     JobsModule,
     ApplicationsModule,
     RedisModule,
+    VerificationRequestsModule,
   ],
 })
 export class AppModule {}

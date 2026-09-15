@@ -17,8 +17,30 @@ describe('VerificationRequestsService', () => {
 
     verificationRequest: {
       create: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+      findUnique: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
     },
   };
+
+  it('should return a verification request by id', async () => {
+    mockPrismaService.verificationRequest.findUnique.mockResolvedValue({
+      id: 'request-id',
+      holderId: 'holder-id',
+      status: VerificationRequestStatus.PENDING,
+      application: {
+        job: {
+          bankId: 'bank-id',
+        },
+      },
+    });
+
+    const result = await service.findOne('request-id');
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        id: 'request-id',
+      }),
+    );
+  });
 
   const mockRedisService = {
     setJson: jest.fn<(...args: unknown[]) => Promise<void>>(),
