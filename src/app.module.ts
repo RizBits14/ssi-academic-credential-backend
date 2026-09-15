@@ -15,6 +15,7 @@ import { WalletModule } from './wallet/wallet.module';
 import { TrustRegistryModule } from './trust-registry/trust-registry.module';
 import { JobsModule } from './jobs/jobs.module';
 import { ApplicationsModule } from './applications/applications.module';
+import { RedisModule } from './redis/redis.module';
 
 @Module({
   imports: [
@@ -35,6 +36,7 @@ import { ApplicationsModule } from './applications/applications.module';
     TrustRegistryModule,
     JobsModule,
     ApplicationsModule,
+    RedisModule,
   ],
 })
 export class AppModule {}
