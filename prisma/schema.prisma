@@ -70,7 +70,8 @@ model User {
   academicRecords         AcademicRecord[]
   credentials             Credential[]
   walletCredentials       WalletCredential[]
-  approvedTrustedIssuers  TrustedIssuer[]      @relation("TrustedIssuerApprover")
+  approvedTrustedIssuers  TrustedIssuer[]           @relation("TrustedIssuerApprover")
+  credentialStatusChanges CredentialStatusHistory[] @relation("CredentialStatusChangedBy")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -213,6 +214,8 @@ model Credential {
   academicRecord     AcademicRecord    @relation(fields: [academicRecordId], references: [id], onDelete: Restrict)
   walletCredential   WalletCredential?
 
+  statusHistory CredentialStatusHistory[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -259,4 +262,23 @@ model TrustedIssuer {
   @@index([organizationId])
   @@index([status])
   @@index([approvedBy])
+}
+
+model CredentialStatusHistory {
+  id             String           @id @default(uuid())
+  credentialId   String
+  previousStatus CredentialStatus
+  newStatus      CredentialStatus
+  reason         String?
+  changedBy      String
+
+  credential    Credential @relation(fields: [credentialId], references: [id], onDelete: Restrict)
+  changedByUser User       @relation("CredentialStatusChangedBy", fields: [changedBy], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+
+  @@index([credentialId])
+  @@index([changedBy])
+  @@index([newStatus])
+  @@index([createdAt])
 }
