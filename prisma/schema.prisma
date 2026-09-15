@@ -58,6 +58,21 @@ enum TrustedIssuerStatus {
   REVOKED
 }
 
+enum ApplicationStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  ACCEPTED
+  REJECTED
+}
+
+enum EducationVerificationStatus {
+  NOT_VERIFIED
+  PENDING
+  VERIFIED
+  FAILED
+}
+
 model User {
   id           String   @id @default(uuid())
   name         String
@@ -72,6 +87,7 @@ model User {
   walletCredentials       WalletCredential[]
   approvedTrustedIssuers  TrustedIssuer[]           @relation("TrustedIssuerApprover")
   credentialStatusChanges CredentialStatusHistory[] @relation("CredentialStatusChangedBy")
+  applications            Application[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -292,11 +308,32 @@ model Job {
   requiredClaims Json
   status         String  @default("OPEN")
 
-  bank Organization @relation(fields: [bankId], references: [id], onDelete: Restrict)
+  bank         Organization  @relation(fields: [bankId], references: [id], onDelete: Restrict)
+  applications Application[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([bankId])
   @@index([status])
+}
+
+model Application {
+  id                          String                      @id @default(uuid())
+  jobId                       String
+  holderId                    String
+  status                      ApplicationStatus           @default(DRAFT)
+  educationVerificationStatus EducationVerificationStatus @default(NOT_VERIFIED)
+  verifiedAcademicData        Json?
+
+  job    Job  @relation(fields: [jobId], references: [id], onDelete: Restrict)
+  holder User @relation(fields: [holderId], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([jobId])
+  @@index([holderId])
+  @@index([status])
+  @@index([educationVerificationStatus])
 }
