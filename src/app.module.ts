@@ -1,15 +1,17 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { HealthModule } from './health/health.module';
-import { PrismaModule } from './prisma/prisma.module';
-import { AuthModule } from './auth/auth.module';
-import { UsersModule } from './users/users.module';
-import { OrganizationsModule } from './organizations/organizations.module';
-import { CryptoModule } from './crypto/crypto.module';
-import { DidModule } from './did/did.module';
+
 import { AcademicRecordsModule } from './academic-records/academic-records.module';
+import { AuthModule } from './auth/auth.module';
 import { CredentialSchemasModule } from './credential-schemas/credential-schemas.module';
 import { CredentialsModule } from './credentials/credentials.module';
+import { CryptoModule } from './crypto/crypto.module';
+import { DidModule } from './did/did.module';
+import { HealthModule } from './health/health.module';
+import { OrganizationsModule } from './organizations/organizations.module';
+import { PrismaModule } from './prisma/prisma.module';
+import { UsersModule } from './users/users.module';
+import { WalletModule } from './wallet/wallet.module';
 
 @Module({
   imports: [
@@ -26,6 +28,7 @@ import { CredentialsModule } from './credentials/credentials.module';
     AcademicRecordsModule,
     CredentialSchemasModule,
     CredentialsModule,
+    WalletModule,
   ],
 })
 export class AppModule {}
