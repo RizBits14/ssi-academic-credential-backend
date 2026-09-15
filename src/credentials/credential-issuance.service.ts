@@ -8,11 +8,13 @@ import { AcademicRecordsService } from '../academic-records/academic-records.ser
 import { CredentialSchemasService } from '../credential-schemas/credential-schemas.service';
 import { DidService } from '../did/did.service';
 import {
+  CredentialStatus,
   DidOwnerType,
   DidStatus,
   OrganizationType,
 } from '../generated/prisma/enums';
 import { OrganizationsService } from '../organizations/organizations.service';
+import { PrismaService } from '../prisma/prisma.service';
 import { CredentialsService } from './credentials.service';
 
 interface PrepareCredentialIssuanceInput {
@@ -30,6 +32,7 @@ export class CredentialIssuanceService {
     private readonly organizationsService: OrganizationsService,
     private readonly didService: DidService,
     private readonly credentialsService: CredentialsService,
+    private readonly prisma: PrismaService,
   ) {}
 
   async prepare(input: PrepareCredentialIssuanceInput) {
@@ -152,5 +155,43 @@ export class CredentialIssuanceService {
       signedCredential,
       encryptedWalletCredential,
     };
+  }
+
+  async issue(input: PrepareCredentialIssuanceInput) {
+    const prepared = await this.prepare(input);
+
+    return this.prisma.$transaction(async (transaction) => {
+      const credential = await transaction.credential.create({
+        data: {
+          vcId: prepared.vcId,
+          issuerOrganizationId: prepared.issuerOrganizationId,
+          issuerDid: prepared.issuerDid,
+          holderId: prepared.holderId,
+          holderDid: prepared.holderDid,
+          schemaId: prepared.schemaId,
+          academicRecordId: prepared.academicRecordId,
+          credentialHash: prepared.credentialHash,
+          status: CredentialStatus.ACTIVE,
+          issuedAt: prepared.issuedAt,
+          expiresAt: prepared.expiresAt,
+        },
+      });
+
+      const walletCredential = await transaction.walletCredential.create({
+        data: {
+          holderId: prepared.holderId,
+          credentialId: credential.id,
+          ciphertext: prepared.encryptedWalletCredential.ciphertext,
+          iv: prepared.encryptedWalletCredential.iv,
+          authTag: prepared.encryptedWalletCredential.authTag,
+        },
+      });
+
+      return {
+        credential,
+        walletCredentialId: walletCredential.id,
+        signedCredential: prepared.signedCredential,
+      };
+    });
   }
 }

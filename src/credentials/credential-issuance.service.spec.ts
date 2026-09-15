@@ -4,11 +4,13 @@ import { AcademicRecordsService } from '../academic-records/academic-records.ser
 import { CredentialSchemasService } from '../credential-schemas/credential-schemas.service';
 import { DidService } from '../did/did.service';
 import {
+  CredentialStatus,
   DidOwnerType,
   DidStatus,
   OrganizationType,
 } from '../generated/prisma/enums';
 import { OrganizationsService } from '../organizations/organizations.service';
+import { PrismaService } from '../prisma/prisma.service';
 import { CredentialIssuanceService } from './credential-issuance.service';
 import { CredentialsService } from './credentials.service';
 
@@ -45,12 +47,32 @@ describe('CredentialIssuanceService', () => {
     >(),
   };
 
+  const mockTransactionClient = {
+    credential: {
+      create: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+    },
+    walletCredential: {
+      create: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+    },
+  };
+
+  const mockPrismaService = {
+    $transaction: jest.fn(
+      async (
+        callback: (
+          transaction: typeof mockTransactionClient,
+        ) => Promise<unknown>,
+      ) => callback(mockTransactionClient),
+    ),
+  };
+
   const service = new CredentialIssuanceService(
     mockAcademicRecordsService as unknown as AcademicRecordsService,
     mockCredentialSchemasService as unknown as CredentialSchemasService,
     mockOrganizationsService as unknown as OrganizationsService,
     mockDidService as unknown as DidService,
     mockCredentialsService as unknown as CredentialsService,
+    mockPrismaService as unknown as PrismaService,
   );
 
   it('should prepare a signed and encrypted credential', async () => {
@@ -162,5 +184,91 @@ describe('CredentialIssuanceService', () => {
         },
       }),
     );
+  });
+
+  it('should persist credential and wallet credential in one transaction', async () => {
+    const preparedCredential = {
+      vcId: 'urn:uuid:credential-123',
+      issuerOrganizationId: 'university-id',
+      issuerDid: 'did:mock:university:123',
+      holderId: 'holder-id',
+      holderDid: 'did:mock:holder:456',
+      schemaId: 'schema-id',
+      academicRecordId: 'record-id',
+      credentialHash: 'credential-hash',
+      issuedAt: new Date('2026-09-15T00:00:00.000Z'),
+      expiresAt: undefined,
+      signedCredential: {
+        id: 'urn:uuid:credential-123',
+        proof: {
+          type: 'Ed25519Signature',
+          created: '2026-09-15T00:00:00.000Z',
+          verificationMethod: 'did:mock:university:123#key-1',
+          proofValue: 'signature',
+        },
+      },
+      encryptedWalletCredential: {
+        ciphertext: 'encrypted',
+        iv: 'iv',
+        authTag: 'auth-tag',
+      },
+    };
+
+    jest.spyOn(service, 'prepare').mockResolvedValueOnce(preparedCredential);
+
+    mockTransactionClient.credential.create.mockResolvedValue({
+      id: 'credential-db-id',
+      vcId: preparedCredential.vcId,
+      status: CredentialStatus.ACTIVE,
+    });
+
+    mockTransactionClient.walletCredential.create.mockResolvedValue({
+      id: 'wallet-credential-id',
+      credentialId: 'credential-db-id',
+    });
+
+    const result = await service.issue({
+      issuerOrganizationId: 'university-id',
+      academicRecordId: 'record-id',
+      schemaId: 'schema-id',
+    });
+
+    expect(mockPrismaService.$transaction).toHaveBeenCalled();
+
+    expect(mockTransactionClient.credential.create).toHaveBeenCalledWith({
+      data: {
+        vcId: preparedCredential.vcId,
+        issuerOrganizationId: preparedCredential.issuerOrganizationId,
+        issuerDid: preparedCredential.issuerDid,
+        holderId: preparedCredential.holderId,
+        holderDid: preparedCredential.holderDid,
+        schemaId: preparedCredential.schemaId,
+        academicRecordId: preparedCredential.academicRecordId,
+        credentialHash: preparedCredential.credentialHash,
+        status: CredentialStatus.ACTIVE,
+        issuedAt: preparedCredential.issuedAt,
+        expiresAt: undefined,
+      },
+    });
+
+    expect(mockTransactionClient.walletCredential.create).toHaveBeenCalledWith({
+      data: {
+        holderId: preparedCredential.holderId,
+        credentialId: 'credential-db-id',
+        ciphertext: 'encrypted',
+        iv: 'iv',
+        authTag: 'auth-tag',
+      },
+    });
+
+    expect(result).toEqual({
+      credential: {
+        id: 'credential-db-id',
+        vcId: 'urn:uuid:credential-123',
+        status: CredentialStatus.ACTIVE,
+      },
+      walletCredentialId: 'wallet-credential-id',
+      signedCredential: preparedCredential.signedCredential,
+    });
   });
 });
