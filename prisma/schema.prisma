@@ -73,6 +73,15 @@ enum EducationVerificationStatus {
   FAILED
 }
 
+enum VerificationRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  EXPIRED
+  VERIFIED
+  FAILED
+}
+
 model User {
   id           String   @id @default(uuid())
   name         String
@@ -80,14 +89,16 @@ model User {
   passwordHash String
   role         UserRole
 
-  refreshTokens           RefreshToken[]
-  organizationMemberships OrganizationMember[]
-  academicRecords         AcademicRecord[]
-  credentials             Credential[]
-  walletCredentials       WalletCredential[]
-  approvedTrustedIssuers  TrustedIssuer[]           @relation("TrustedIssuerApprover")
-  credentialStatusChanges CredentialStatusHistory[] @relation("CredentialStatusChangedBy")
-  applications            Application[]
+  refreshTokens                RefreshToken[]
+  organizationMemberships      OrganizationMember[]
+  academicRecords              AcademicRecord[]
+  credentials                  Credential[]
+  walletCredentials            WalletCredential[]
+  approvedTrustedIssuers       TrustedIssuer[]           @relation("TrustedIssuerApprover")
+  credentialStatusChanges      CredentialStatusHistory[] @relation("CredentialStatusChangedBy")
+  applications                 Application[]
+  verificationRequestsCreated  VerificationRequest[]     @relation("VerificationRequestVerifier")
+  verificationRequestsReceived VerificationRequest[]     @relation("VerificationRequestHolder")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -329,6 +340,8 @@ model Application {
   job    Job  @relation(fields: [jobId], references: [id], onDelete: Restrict)
   holder User @relation(fields: [holderId], references: [id], onDelete: Restrict)
 
+  verificationRequests VerificationRequest[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -336,4 +349,28 @@ model Application {
   @@index([holderId])
   @@index([status])
   @@index([educationVerificationStatus])
+}
+
+model VerificationRequest {
+  id              String                    @id @default(uuid())
+  applicationId   String
+  verifierId      String
+  holderId        String
+  requestedClaims Json
+  nonceHash       String
+  status          VerificationRequestStatus @default(PENDING)
+  expiresAt       DateTime
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Restrict)
+  verifier    User        @relation("VerificationRequestVerifier", fields: [verifierId], references: [id], onDelete: Restrict)
+  holder      User        @relation("VerificationRequestHolder", fields: [holderId], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([applicationId])
+  @@index([verifierId])
+  @@index([holderId])
+  @@index([status])
+  @@index([expiresAt])
 }
