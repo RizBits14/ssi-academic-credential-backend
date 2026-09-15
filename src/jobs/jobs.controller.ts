@@ -5,6 +5,7 @@ import {
   NotFoundException,
   Param,
   ParseUUIDPipe,
+  Patch,
   Post,
   Req,
   UseGuards,
@@ -18,6 +19,7 @@ import { OrganizationType, UserRole } from '../generated/prisma/enums';
 import { OrganizationsService } from '../organizations/organizations.service';
 import { CreateJobDto } from './dto/create-job.dto';
 import { JobsService } from './jobs.service';
+import { UpdateJobDto } from './dto/update-job.dto';
 
 @Controller('jobs')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -46,6 +48,18 @@ export class JobsController {
   @Get()
   async findAll() {
     return this.jobsService.findAll();
+  }
+
+  @Patch(':id')
+  @Roles(UserRole.VERIFIER_ADMIN)
+  async update(
+    @Req() request: AuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateJobDto,
+  ) {
+    const bankId = await this.getBankId(request.user.sub);
+
+    return this.jobsService.update(id, bankId, dto);
   }
 
   @Get(':id')

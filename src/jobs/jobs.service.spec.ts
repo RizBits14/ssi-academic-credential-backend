@@ -13,8 +13,61 @@ describe('JobsService', () => {
       create: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
       findMany: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
       findUnique: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+      findFirst: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+      update: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
     },
   };
+
+  it('should update a job owned by the bank', async () => {
+    mockPrismaService.job.findFirst.mockResolvedValue({
+      id: 'job-id',
+      bankId: 'bank-id',
+      status: 'OPEN',
+    });
+
+    mockPrismaService.job.update.mockResolvedValue({
+      id: 'job-id',
+      bankId: 'bank-id',
+      title: 'Updated Graduate Engineer',
+      requiredClaims: ['degree', 'major'],
+      status: 'OPEN',
+    });
+
+    const result = await service.update('job-id', 'bank-id', {
+      title: 'Updated Graduate Engineer',
+      requiredClaims: ['degree', 'major'],
+    });
+
+    expect(mockPrismaService.job.update).toHaveBeenCalledWith({
+      where: {
+        id: 'job-id',
+      },
+      data: {
+        title: 'Updated Graduate Engineer',
+        description: undefined,
+        requiredClaims: ['degree', 'major'],
+      },
+      include: {
+        bank: true,
+      },
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        title: 'Updated Graduate Engineer',
+      }),
+    );
+  });
+
+  it('should reject updating a job not owned by the bank', async () => {
+    mockPrismaService.job.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.update('job-id', 'different-bank-id', {
+        title: 'Changed title',
+      }),
+    ).rejects.toThrow('Job not found');
+  });
 
   const service = new JobsService(
     mockPrismaService as unknown as PrismaService,

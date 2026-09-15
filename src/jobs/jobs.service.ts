@@ -14,6 +14,12 @@ interface CreateJobInput {
   requiredClaims: string[];
 }
 
+interface UpdateJobInput {
+  title?: string;
+  description?: string;
+  requiredClaims?: string[];
+}
+
 @Injectable()
 export class JobsService {
   constructor(private readonly prisma: PrismaService) {}
@@ -95,5 +101,36 @@ export class JobsService {
         'Required claims cannot contain duplicates',
       );
     }
+  }
+
+  async update(id: string, bankId: string, input: UpdateJobInput) {
+    const job = await this.prisma.job.findFirst({
+      where: {
+        id,
+        bankId,
+      },
+    });
+
+    if (!job) {
+      throw new NotFoundException('Job not found');
+    }
+
+    if (input.requiredClaims) {
+      this.validateRequiredClaims(input.requiredClaims);
+    }
+
+    return this.prisma.job.update({
+      where: {
+        id,
+      },
+      data: {
+        title: input.title,
+        description: input.description,
+        requiredClaims: input.requiredClaims,
+      },
+      include: {
+        bank: true,
+      },
+    });
   }
 }
