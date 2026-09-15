@@ -3,6 +3,8 @@ import {
   Controller,
   Get,
   Param,
+  ParseUUIDPipe,
+  Patch,
   Post,
   Req,
   UseGuards,
@@ -42,5 +44,10 @@ export class TrustRegistryController {
   @Get(':did')
   async findByDid(@Param('did') did: string) {
     return this.trustRegistryService.findByDid(did);
+  }
+
+  @Patch(':id/suspend')
+  async suspend(@Param('id', ParseUUIDPipe) id: string) {
+    return this.trustRegistryService.suspend(id);
   }
 }

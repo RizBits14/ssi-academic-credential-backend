@@ -17,6 +17,7 @@ describe('TrustRegistryService', () => {
       findUnique: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
       findMany: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
       create: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+      update: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
     },
   };
 
@@ -129,5 +130,49 @@ describe('TrustRegistryService', () => {
         approvedBy: 'admin-id',
       }),
     ).rejects.toThrow('Issuer DID does not belong to the organization');
+  });
+
+  it('should suspend a trusted issuer', async () => {
+    mockPrismaService.trustedIssuer.findUnique.mockResolvedValue({
+      id: 'trusted-issuer-id',
+      issuerDid: 'did:mock:university:123',
+      status: TrustedIssuerStatus.TRUSTED,
+    });
+
+    mockPrismaService.trustedIssuer.update.mockResolvedValue({
+      id: 'trusted-issuer-id',
+      issuerDid: 'did:mock:university:123',
+      status: TrustedIssuerStatus.SUSPENDED,
+      suspendedAt: new Date(),
+    });
+
+    const result = await service.suspend('trusted-issuer-id');
+
+    expect(mockPrismaService.trustedIssuer.update).toHaveBeenCalledWith({
+      where: {
+        id: 'trusted-issuer-id',
+      },
+      data: {
+        status: TrustedIssuerStatus.SUSPENDED,
+        suspendedAt: expect.any(Date),
+      },
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        status: TrustedIssuerStatus.SUSPENDED,
+      }),
+    );
+  });
+
+  it('should reject suspending an already suspended issuer', async () => {
+    mockPrismaService.trustedIssuer.findUnique.mockResolvedValue({
+      id: 'trusted-issuer-id',
+      status: TrustedIssuerStatus.SUSPENDED,
+    });
+
+    await expect(service.suspend('trusted-issuer-id')).rejects.toThrow(
+      'Only a trusted issuer can be suspended',
+    );
   });
 });

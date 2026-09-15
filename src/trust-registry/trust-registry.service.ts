@@ -136,4 +136,30 @@ export class TrustRegistryService {
 
     return trustedIssuer?.status === TrustedIssuerStatus.TRUSTED;
   }
+
+  async suspend(id: string) {
+    const trustedIssuer = await this.prisma.trustedIssuer.findUnique({
+      where: {
+        id,
+      },
+    });
+
+    if (!trustedIssuer) {
+      throw new NotFoundException('Trusted issuer not found');
+    }
+
+    if (trustedIssuer.status !== TrustedIssuerStatus.TRUSTED) {
+      throw new ConflictException('Only a trusted issuer can be suspended');
+    }
+
+    return this.prisma.trustedIssuer.update({
+      where: {
+        id,
+      },
+      data: {
+        status: TrustedIssuerStatus.SUSPENDED,
+        suspendedAt: new Date(),
+      },
+    });
+  }
 }
