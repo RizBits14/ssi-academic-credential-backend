@@ -13,6 +13,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { UsersModule } from './users/users.module';
 import { WalletModule } from './wallet/wallet.module';
 import { TrustRegistryModule } from './trust-registry/trust-registry.module';
+import { JobsModule } from './jobs/jobs.module';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { TrustRegistryModule } from './trust-registry/trust-registry.module';
     CredentialsModule,
     WalletModule,
     TrustRegistryModule,
+    JobsModule,
   ],
 })
 export class AppModule {}
