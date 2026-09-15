@@ -14,6 +14,7 @@ import { UsersModule } from './users/users.module';
 import { WalletModule } from './wallet/wallet.module';
 import { TrustRegistryModule } from './trust-registry/trust-registry.module';
 import { JobsModule } from './jobs/jobs.module';
+import { ApplicationsModule } from './applications/applications.module';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { JobsModule } from './jobs/jobs.module';
     WalletModule,
     TrustRegistryModule,
     JobsModule,
+    ApplicationsModule,
   ],
 })
 export class AppModule {}
