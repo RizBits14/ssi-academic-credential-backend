@@ -57,4 +57,9 @@ export class WalletController {
       credential,
     };
   }
+
+  @Get('requests')
+  async findPendingRequests(@Req() request: AuthenticatedRequest) {
+    return this.walletService.findPendingRequests(request.user.sub);
+  }
 }

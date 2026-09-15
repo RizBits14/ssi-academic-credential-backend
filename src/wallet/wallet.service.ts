@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 
 import { EncryptionService } from '../crypto/encryption.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { VerificationRequestStatus } from '../generated/prisma/enums';
 
 @Injectable()
 export class WalletService {
@@ -68,5 +69,54 @@ export class WalletService {
     });
 
     return JSON.parse(plaintext) as Record<string, unknown>;
+  }
+
+  async findPendingRequests(holderId: string) {
+    const now = new Date();
+
+    await this.prisma.verificationRequest.updateMany({
+      where: {
+        holderId,
+        status: VerificationRequestStatus.PENDING,
+        expiresAt: {
+          lte: now,
+        },
+      },
+      data: {
+        status: VerificationRequestStatus.EXPIRED,
+      },
+    });
+
+    const requests = await this.prisma.verificationRequest.findMany({
+      where: {
+        holderId,
+        status: VerificationRequestStatus.PENDING,
+        expiresAt: {
+          gt: now,
+        },
+      },
+      include: {
+        application: {
+          include: {
+            job: {
+              include: {
+                bank: true,
+              },
+            },
+          },
+        },
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+    });
+
+    return requests.map((request) => ({
+      requestId: request.id,
+      bank: request.application.job.bank.name,
+      job: request.application.job.title,
+      requestedClaims: request.requestedClaims,
+      expiresAt: request.expiresAt,
+    }));
   }
 }

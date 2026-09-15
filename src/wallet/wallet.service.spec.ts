@@ -10,6 +10,10 @@ describe('WalletService', () => {
       findMany: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
       findFirst: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
     },
+    verificationRequest: {
+      updateMany: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+      findMany: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+    },
   };
 
   const mockEncryptionService = {
@@ -114,5 +118,59 @@ describe('WalletService', () => {
     await expect(
       service.findOneForHolder('different-holder-id', 'wallet-credential-id'),
     ).rejects.toThrow('Wallet credential not found');
+  });
+
+  it('should return pending verification requests for the holder', async () => {
+    const expiresAt = new Date('2030-01-01T00:00:00.000Z');
+
+    mockPrismaService.verificationRequest.updateMany.mockResolvedValue({
+      count: 0,
+    });
+
+    mockPrismaService.verificationRequest.findMany.mockResolvedValue([
+      {
+        id: 'request-id',
+        requestedClaims: ['degree', 'major'],
+        expiresAt,
+        application: {
+          job: {
+            title: 'Graduate Engineer',
+            bank: {
+              name: 'Example Bank',
+            },
+          },
+        },
+      },
+    ]);
+
+    const result = await service.findPendingRequests('holder-id');
+
+    expect(
+      mockPrismaService.verificationRequest.updateMany,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          holderId: 'holder-id',
+        }),
+      }),
+    );
+
+    expect(mockPrismaService.verificationRequest.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          holderId: 'holder-id',
+        }),
+      }),
+    );
+
+    expect(result).toEqual([
+      {
+        requestId: 'request-id',
+        bank: 'Example Bank',
+        job: 'Graduate Engineer',
+        requestedClaims: ['degree', 'major'],
+        expiresAt,
+      },
+    ]);
   });
 });
