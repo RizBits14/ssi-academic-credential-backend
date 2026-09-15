@@ -72,7 +72,14 @@ describe('TrustRegistryService', () => {
       },
       include: {
         organization: true,
-        approvedByUser: true,
+        approvedByUser: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            role: true,
+          },
+        },
       },
     });
 

@@ -12,6 +12,7 @@ import { OrganizationsModule } from './organizations/organizations.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { UsersModule } from './users/users.module';
 import { WalletModule } from './wallet/wallet.module';
+import { TrustRegistryModule } from './trust-registry/trust-registry.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { WalletModule } from './wallet/wallet.module';
     CredentialSchemasModule,
     CredentialsModule,
     WalletModule,
+    TrustRegistryModule,
   ],
 })
 export class AppModule {}

@@ -79,7 +79,14 @@ export class TrustRegistryService {
       },
       include: {
         organization: true,
-        approvedByUser: true,
+        approvedByUser: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            role: true,
+          },
+        },
       },
     });
   }
@@ -88,7 +95,14 @@ export class TrustRegistryService {
     return this.prisma.trustedIssuer.findMany({
       include: {
         organization: true,
-        approvedByUser: true,
+        approvedByUser: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            role: true,
+          },
+        },
       },
       orderBy: {
         createdAt: 'desc',
