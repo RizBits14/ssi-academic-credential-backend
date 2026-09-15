@@ -52,6 +52,12 @@ enum CredentialStatus {
   EXPIRED
 }
 
+enum TrustedIssuerStatus {
+  TRUSTED
+  SUSPENDED
+  REVOKED
+}
+
 model User {
   id           String   @id @default(uuid())
   name         String
@@ -64,6 +70,7 @@ model User {
   academicRecords         AcademicRecord[]
   credentials             Credential[]
   walletCredentials       WalletCredential[]
+  approvedTrustedIssuers  TrustedIssuer[]      @relation("TrustedIssuerApprover")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -92,10 +99,11 @@ model Organization {
   website String?
   status  OrganizationStatus @default(ACTIVE)
 
-  members           OrganizationMember[]
-  academicRecords   AcademicRecord[]
-  credentialSchemas CredentialSchema[]
-  issuedCredentials Credential[]
+  members                    OrganizationMember[]
+  academicRecords            AcademicRecord[]
+  credentialSchemas          CredentialSchema[]
+  issuedCredentials          Credential[]
+  trustedIssuerRegistrations TrustedIssuer[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -231,4 +239,24 @@ model WalletCredential {
   updatedAt DateTime @updatedAt
 
   @@index([holderId])
+}
+
+model TrustedIssuer {
+  id             String              @id @default(uuid())
+  organizationId String
+  issuerDid      String              @unique
+  status         TrustedIssuerStatus @default(TRUSTED)
+  approvedBy     String
+  approvedAt     DateTime            @default(now())
+  suspendedAt    DateTime?
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  approvedByUser User         @relation("TrustedIssuerApprover", fields: [approvedBy], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([status])
+  @@index([approvedBy])
 }
