@@ -160,4 +160,30 @@ export class DidService {
       },
     });
   }
+
+  async signForUser(userId: string, data: string) {
+    const didRecord = await this.findByOwner(DidOwnerType.USER, userId);
+
+    if (!didRecord) {
+      throw new NotFoundException('Holder DID not found');
+    }
+
+    if (didRecord.status !== DidStatus.ACTIVE) {
+      throw new ConflictException('Holder DID is not active');
+    }
+
+    const privateKey = this.encryptionService.decrypt({
+      ciphertext: didRecord.encryptedPrivateKey,
+      iv: didRecord.iv,
+      authTag: didRecord.authTag,
+    });
+
+    const signature = this.signatureService.sign(data, privateKey);
+
+    return {
+      did: didRecord.did,
+      keyVersion: didRecord.keyVersion,
+      signature,
+    };
+  }
 }

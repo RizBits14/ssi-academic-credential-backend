@@ -17,6 +17,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { OrganizationType, UserRole } from '../generated/prisma/enums';
 import { OrganizationsService } from '../organizations/organizations.service';
+import { ApproveVerificationRequestDto } from './dto/approve-verification-request.dto';
 import { CreateVerificationRequestDto } from './dto/create-verification-request.dto';
 import { VerificationRequestsService } from './verification-requests.service';
 
@@ -32,8 +33,7 @@ export class VerificationRequestsController {
   @Roles(UserRole.VERIFIER_ADMIN)
   async create(
     @Req() request: AuthenticatedRequest,
-    @Body()
-    dto: CreateVerificationRequestDto,
+    @Body() dto: CreateVerificationRequestDto,
   ) {
     const bankId = await this.getBankId(request.user.sub);
 
@@ -45,12 +45,35 @@ export class VerificationRequestsController {
     });
   }
 
+  @Post(':id/approve')
+  @Roles(UserRole.HOLDER)
+  approve(
+    @Req() request: AuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ApproveVerificationRequestDto,
+  ) {
+    return this.verificationRequestsService.approve({
+      requestId: id,
+      holderId: request.user.sub,
+      credentialId: dto.credentialId,
+      approvedClaims: dto.approvedClaims,
+    });
+  }
+
+  @Post(':id/reject')
+  @Roles(UserRole.HOLDER)
+  reject(
+    @Req() request: AuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.verificationRequestsService.reject(id, request.user.sub);
+  }
+
   @Get(':id')
   @Roles(UserRole.HOLDER, UserRole.VERIFIER_ADMIN)
   async findOne(
     @Req() request: AuthenticatedRequest,
-    @Param('id', ParseUUIDPipe)
-    id: string,
+    @Param('id', ParseUUIDPipe) id: string,
   ) {
     const verificationRequest =
       await this.verificationRequestsService.findOne(id);

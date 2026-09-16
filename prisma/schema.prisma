@@ -99,6 +99,7 @@ model User {
   applications                 Application[]
   verificationRequestsCreated  VerificationRequest[]     @relation("VerificationRequestVerifier")
   verificationRequestsReceived VerificationRequest[]     @relation("VerificationRequestHolder")
+  presentations                Presentation[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -243,6 +244,7 @@ model Credential {
   walletCredential   WalletCredential?
 
   statusHistory CredentialStatusHistory[]
+  presentations Presentation[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -361,9 +363,10 @@ model VerificationRequest {
   status          VerificationRequestStatus @default(PENDING)
   expiresAt       DateTime
 
-  application Application @relation(fields: [applicationId], references: [id], onDelete: Restrict)
-  verifier    User        @relation("VerificationRequestVerifier", fields: [verifierId], references: [id], onDelete: Restrict)
-  holder      User        @relation("VerificationRequestHolder", fields: [holderId], references: [id], onDelete: Restrict)
+  application  Application   @relation(fields: [applicationId], references: [id], onDelete: Restrict)
+  verifier     User          @relation("VerificationRequestVerifier", fields: [verifierId], references: [id], onDelete: Restrict)
+  holder       User          @relation("VerificationRequestHolder", fields: [holderId], references: [id], onDelete: Restrict)
+  presentation Presentation?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -373,4 +376,26 @@ model VerificationRequest {
   @@index([holderId])
   @@index([status])
   @@index([expiresAt])
+}
+
+model Presentation {
+  id               String @id @default(uuid())
+  requestId        String @unique
+  credentialId     String
+  holderId         String
+  holderDid        String
+  disclosedClaims  Json
+  nonce            String
+  presentationHash String
+  holderProof      Json
+
+  request    VerificationRequest @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  credential Credential          @relation(fields: [credentialId], references: [id], onDelete: Restrict)
+  holder     User                @relation(fields: [holderId], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+
+  @@index([credentialId])
+  @@index([holderId])
+  @@index([createdAt])
 }

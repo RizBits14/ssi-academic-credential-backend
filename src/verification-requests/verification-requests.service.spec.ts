@@ -7,6 +7,16 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { VerificationRequestsService } from './verification-requests.service';
+import { EncryptionService } from '../crypto/encryption.service';
+import { DidService } from '../did/did.service';
+
+const mockEncryptionService = {
+  decrypt: jest.fn<(...args: unknown[]) => string>(),
+};
+
+const mockDidService = {
+  signForUser: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+};
 
 describe('VerificationRequestsService', () => {
   const mockPrismaService = {
@@ -49,6 +59,8 @@ describe('VerificationRequestsService', () => {
   const service = new VerificationRequestsService(
     mockPrismaService as unknown as PrismaService,
     mockRedisService as unknown as RedisService,
+    mockEncryptionService as unknown as EncryptionService,
+    mockDidService as unknown as DidService,
   );
 
   it('should create a verification request', async () => {
