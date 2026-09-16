@@ -10,17 +10,20 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
+import { ApiTags } from '@nestjs/swagger';
 
 import type { AuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
+import { ApiProtectedEndpoint } from '../common/swagger/api-endpoint.decorator';
 import { OrganizationType, UserRole } from '../generated/prisma/enums';
 import { OrganizationsService } from '../organizations/organizations.service';
 import { ApproveVerificationRequestDto } from './dto/approve-verification-request.dto';
 import { CreateVerificationRequestDto } from './dto/create-verification-request.dto';
 import { VerificationRequestsService } from './verification-requests.service';
 
+@ApiTags('verification-requests')
 @Controller('verification-requests')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class VerificationRequestsController {
@@ -29,6 +32,7 @@ export class VerificationRequestsController {
     private readonly organizationsService: OrganizationsService,
   ) {}
 
+  @ApiProtectedEndpoint('Create a credential verification request', 201)
   @Post()
   @Roles(UserRole.VERIFIER_ADMIN)
   async create(
@@ -45,6 +49,10 @@ export class VerificationRequestsController {
     });
   }
 
+  @ApiProtectedEndpoint(
+    'Approve requested credential claims and create a presentation',
+    201,
+  )
   @Post(':id/approve')
   @Roles(UserRole.HOLDER)
   approve(
@@ -60,6 +68,7 @@ export class VerificationRequestsController {
     });
   }
 
+  @ApiProtectedEndpoint('Reject a credential verification request', 201)
   @Post(':id/reject')
   @Roles(UserRole.HOLDER)
   reject(
@@ -69,6 +78,7 @@ export class VerificationRequestsController {
     return this.verificationRequestsService.reject(id, request.user.sub);
   }
 
+  @ApiProtectedEndpoint('Get an authorized verification request')
   @Get(':id')
   @Roles(UserRole.HOLDER, UserRole.VERIFIER_ADMIN)
   async findOne(

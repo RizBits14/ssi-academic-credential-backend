@@ -4,21 +4,24 @@ import {
   Get,
   NotFoundException,
   Post,
+  Query,
   Req,
   UseGuards,
-  Query,
 } from '@nestjs/common';
+import { ApiTags } from '@nestjs/swagger';
 
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import type { AuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
+import { ApiProtectedEndpoint } from '../common/swagger/api-endpoint.decorator';
 import { OrganizationType, UserRole } from '../generated/prisma/enums';
 import { OrganizationsService } from '../organizations/organizations.service';
 import { CredentialSchemasService } from './credential-schemas.service';
 import { CreateCredentialSchemaDto } from './dto/create-credential-schema.dto';
 import { ListCredentialSchemasDto } from './dto/list-credential-schemas.dto';
 
+@ApiTags('credential-schemas')
 @Controller('credential-schemas')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(UserRole.ISSUER_ADMIN)
@@ -28,6 +31,7 @@ export class CredentialSchemasController {
     private readonly organizationsService: OrganizationsService,
   ) {}
 
+  @ApiProtectedEndpoint('Create a credential schema', 201)
   @Post()
   async create(
     @Req() request: AuthenticatedRequest,
@@ -44,7 +48,7 @@ export class CredentialSchemasController {
     });
   }
 
-  @Get()
+  @ApiProtectedEndpoint('List credential schemas with pagination and filters')
   @Get()
   async findAll(
     @Req() request: AuthenticatedRequest,

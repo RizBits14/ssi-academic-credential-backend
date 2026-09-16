@@ -6,19 +6,19 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiTags } from '@nestjs/swagger';
 
 import type { AuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
+import { ApiProtectedEndpoint } from '../common/swagger/api-endpoint.decorator';
 import { OrganizationType, UserRole } from '../generated/prisma/enums';
 import { OrganizationsService } from '../organizations/organizations.service';
 import { AuditService } from './audit.service';
 import { ListAuditLogsDto } from './dto/list-audit-logs.dto';
 
 @ApiTags('audit')
-@ApiBearerAuth('access-token')
 @Controller('audit-logs')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class AuditController {
@@ -27,11 +27,11 @@ export class AuditController {
     private readonly organizationsService: OrganizationsService,
   ) {}
 
+  @ApiProtectedEndpoint(
+    'List authorized audit logs with pagination and filters',
+  )
   @Get()
   @Roles(UserRole.SYSTEM_ADMIN, UserRole.ISSUER_ADMIN, UserRole.VERIFIER_ADMIN)
-  @ApiOperation({
-    summary: 'List authorized audit logs',
-  })
   async findAll(
     @Req() request: AuthenticatedRequest,
     @Query() query: ListAuditLogsDto,

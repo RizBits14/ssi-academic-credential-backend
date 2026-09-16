@@ -7,22 +7,25 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Query,
   Req,
   UseGuards,
-  Query,
 } from '@nestjs/common';
+import { ApiTags } from '@nestjs/swagger';
 
 import type { AuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
+import { ApiProtectedEndpoint } from '../common/swagger/api-endpoint.decorator';
 import { OrganizationType, UserRole } from '../generated/prisma/enums';
 import { OrganizationsService } from '../organizations/organizations.service';
 import { CreateJobDto } from './dto/create-job.dto';
-import { JobsService } from './jobs.service';
-import { UpdateJobDto } from './dto/update-job.dto';
 import { ListJobsDto } from './dto/list-jobs.dto';
+import { UpdateJobDto } from './dto/update-job.dto';
+import { JobsService } from './jobs.service';
 
+@ApiTags('jobs')
 @Controller('jobs')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class JobsController {
@@ -31,6 +34,7 @@ export class JobsController {
     private readonly organizationsService: OrganizationsService,
   ) {}
 
+  @ApiProtectedEndpoint('Create a recruitment job', 201)
   @Post()
   @Roles(UserRole.VERIFIER_ADMIN)
   async create(
@@ -47,6 +51,7 @@ export class JobsController {
     });
   }
 
+  @ApiProtectedEndpoint('List recruitment jobs with pagination and filters')
   @Get()
   async findAll(@Query() query: ListJobsDto) {
     return this.jobsService.findAllPaginated({
@@ -57,6 +62,7 @@ export class JobsController {
     });
   }
 
+  @ApiProtectedEndpoint('Update a recruitment job')
   @Patch(':id')
   @Roles(UserRole.VERIFIER_ADMIN)
   async update(
@@ -69,6 +75,7 @@ export class JobsController {
     return this.jobsService.update(id, bankId, dto);
   }
 
+  @ApiProtectedEndpoint('Get a recruitment job')
   @Get(':id')
   async findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.jobsService.findOne(id);
