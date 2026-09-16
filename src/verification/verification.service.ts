@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -10,8 +11,11 @@ import { CredentialSchemasService } from '../credential-schemas/credential-schem
 import { EncryptionService } from '../crypto/encryption.service';
 import { SignatureService } from '../crypto/signature.service';
 import { DidService } from '../did/did.service';
+import type { Prisma } from '../generated/prisma/client';
 import {
   CredentialStatus,
+  EducationVerificationStatus,
+  VerificationFinalResult,
   VerificationRequestStatus,
 } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
@@ -46,7 +50,11 @@ export class VerificationService {
       include: {
         request: {
           include: {
-            application: true,
+            application: {
+              include: {
+                job: true,
+              },
+            },
           },
         },
         credential: true,
@@ -151,6 +159,7 @@ export class VerificationService {
     );
 
     const holderSignature = holderProof.signature;
+
     const holderVerificationMethod = holderProof.verificationMethod;
 
     if (
@@ -218,6 +227,7 @@ export class VerificationService {
     );
 
     const proofValue = proof.proofValue;
+
     const issuerVerificationMethod = proof.verificationMethod;
 
     if (
@@ -422,6 +432,7 @@ export class VerificationService {
       }
 
       const disclosedValue = disclosedClaims[claim];
+
       const credentialValue = credentialClaims[claim];
 
       if (
@@ -449,6 +460,103 @@ export class VerificationService {
     };
   }
 
+  async verifyPresentation(presentationId: string, bankId: string) {
+    const context = await this.validateCredentialChecks(presentationId);
+
+    const { presentation, request } = context;
+
+    if (request.application.job.bankId !== bankId) {
+      throw new ForbiddenException(
+        'This verification request does not belong to your bank',
+      );
+    }
+
+    const disclosedClaims = this.requireRecord(
+      presentation.disclosedClaims,
+      'Disclosed claims are invalid',
+    );
+
+    const existingResult = await this.prisma.verificationResult.findUnique({
+      where: {
+        presentationId: presentation.id,
+      },
+    });
+
+    if (existingResult) {
+      throw new ConflictException('Presentation has already been verified');
+    }
+
+    const result = await this.prisma.$transaction(async (transaction) => {
+      const verificationResult = await transaction.verificationResult.create({
+        data: {
+          presentationId: presentation.id,
+          applicationId: request.applicationId,
+
+          requestValid: true,
+          nonceValid: true,
+          holderProofValid: true,
+          hashValid: true,
+          issuerSignatureValid: true,
+          issuerTrusted: true,
+          credentialStatusValid: true,
+          schemaValid: true,
+          holderMatches: true,
+          claimsValid: true,
+
+          finalResult: VerificationFinalResult.VERIFIED,
+
+          failureReason: null,
+        },
+      });
+
+      await transaction.application.update({
+        where: {
+          id: request.applicationId,
+        },
+        data: {
+          educationVerificationStatus: EducationVerificationStatus.VERIFIED,
+
+          verifiedAcademicData: disclosedClaims as Prisma.InputJsonObject,
+        },
+      });
+
+      await transaction.verificationRequest.update({
+        where: {
+          id: request.id,
+        },
+        data: {
+          status: VerificationRequestStatus.VERIFIED,
+        },
+      });
+
+      return verificationResult;
+    });
+
+    await this.redis.delete(`verification-request:${request.id}`);
+
+    return {
+      verified: true,
+
+      verificationResultId: result.id,
+
+      checks: {
+        requestValid: true,
+        nonceValid: true,
+        holderProofValid: true,
+        credentialHashValid: true,
+        issuerSignatureValid: true,
+        issuerTrusted: true,
+        credentialActive: true,
+        credentialNotExpired: true,
+        schemaValid: true,
+        holderMatches: true,
+        claimsValid: true,
+      },
+
+      verifiedClaims: disclosedClaims,
+    };
+  }
+
   private requireStringArray(value: unknown, errorMessage: string): string[] {
     if (
       !Array.isArray(value) ||
@@ -467,6 +575,7 @@ export class VerificationService {
     }
 
     const firstSorted = [...first].sort();
+
     const secondSorted = [...second].sort();
 
     return firstSorted.every((value, index) => value === secondSorted[index]);
