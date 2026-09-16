@@ -6,6 +6,9 @@ import {
 } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 
+import { EncryptionService } from '../crypto/encryption.service';
+import { SignatureService } from '../crypto/signature.service';
+import { DidService } from '../did/did.service';
 import { VerificationRequestStatus } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
@@ -23,6 +26,9 @@ export class VerificationService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
+    private readonly encryptionService: EncryptionService,
+    private readonly signatureService: SignatureService,
+    private readonly didService: DidService,
   ) {}
 
   async validateRequestContext(presentationId: string) {
@@ -125,5 +131,197 @@ export class VerificationService {
         holderMatches: true,
       },
     };
+  }
+
+  async validateCryptographicChecks(presentationId: string) {
+    const context = await this.validateRequestContext(presentationId);
+
+    const { presentation, request } = context;
+
+    const holderProof = this.requireRecord(
+      presentation.holderProof,
+      'Holder proof is invalid',
+    );
+
+    const holderSignature = holderProof.signature;
+
+    const holderVerificationMethod = holderProof.verificationMethod;
+
+    if (
+      typeof holderSignature !== 'string' ||
+      typeof holderVerificationMethod !== 'string'
+    ) {
+      throw new BadRequestException('Holder proof is invalid');
+    }
+
+    const holderDidDocument = await this.didService.resolveDid(
+      presentation.holderDid,
+    );
+
+    if (holderVerificationMethod !== holderDidDocument.verificationMethod.id) {
+      throw new BadRequestException(
+        'Holder verification method does not match holder DID',
+      );
+    }
+
+    const holderSigningPayload = {
+      presentationId: presentation.id,
+      requestId: request.id,
+      nonce: presentation.nonce,
+      credentialId: presentation.credentialId,
+      disclosedClaims: presentation.disclosedClaims,
+    };
+
+    const canonicalHolderPayload = this.canonicalize(holderSigningPayload);
+
+    const holderProofValid = this.signatureService.verify(
+      canonicalHolderPayload,
+      holderSignature,
+      holderDidDocument.verificationMethod.publicKey,
+    );
+
+    if (!holderProofValid) {
+      throw new BadRequestException('Holder proof is invalid');
+    }
+
+    const walletCredential = await this.prisma.walletCredential.findFirst({
+      where: {
+        credentialId: presentation.credentialId,
+        holderId: presentation.holderId,
+      },
+    });
+
+    if (!walletCredential) {
+      throw new NotFoundException('Credential not found in holder wallet');
+    }
+
+    const decryptedCredential = this.encryptionService.decrypt({
+      ciphertext: walletCredential.ciphertext,
+      iv: walletCredential.iv,
+      authTag: walletCredential.authTag,
+    });
+
+    const signedCredential = this.parseJsonObject(
+      decryptedCredential,
+      'Stored credential is invalid',
+    );
+
+    const proof = this.requireRecord(
+      signedCredential.proof,
+      'Issuer proof is invalid',
+    );
+
+    const proofValue = proof.proofValue;
+    const issuerVerificationMethod = proof.verificationMethod;
+
+    if (
+      typeof proofValue !== 'string' ||
+      typeof issuerVerificationMethod !== 'string'
+    ) {
+      throw new BadRequestException('Issuer proof is invalid');
+    }
+
+    const unsignedCredential: Record<string, unknown> = {
+      ...signedCredential,
+    };
+
+    delete unsignedCredential.proof;
+
+    const canonicalCredential = this.canonicalize(unsignedCredential);
+
+    const calculatedCredentialHash = createHash('sha256')
+      .update(canonicalCredential)
+      .digest('hex');
+
+    const hashValid =
+      calculatedCredentialHash === presentation.credential.credentialHash;
+
+    if (!hashValid) {
+      throw new BadRequestException('Credential hash is invalid');
+    }
+
+    const issuerDidDocument = await this.didService.resolveDid(
+      presentation.credential.issuerDid,
+    );
+
+    if (issuerVerificationMethod !== issuerDidDocument.verificationMethod.id) {
+      throw new BadRequestException(
+        'Issuer verification method does not match issuer DID',
+      );
+    }
+
+    const issuerSignatureValid = this.signatureService.verify(
+      canonicalCredential,
+      proofValue,
+      issuerDidDocument.verificationMethod.publicKey,
+    );
+
+    if (!issuerSignatureValid) {
+      throw new BadRequestException('Issuer signature is invalid');
+    }
+
+    return {
+      ...context,
+      signedCredential,
+      unsignedCredential,
+      checks: {
+        ...context.checks,
+        holderProofValid: true,
+        hashValid: true,
+        issuerSignatureValid: true,
+      },
+    };
+  }
+
+  private canonicalize(value: unknown): string {
+    return JSON.stringify(this.sortValue(value));
+  }
+
+  private sortValue(value: unknown): unknown {
+    if (Array.isArray(value)) {
+      return value.map((item) => this.sortValue(item));
+    }
+
+    if (typeof value === 'object' && value !== null) {
+      const object = value as Record<string, unknown>;
+
+      return Object.keys(object)
+        .sort()
+        .reduce<Record<string, unknown>>((result, key) => {
+          result[key] = this.sortValue(object[key]);
+
+          return result;
+        }, {});
+    }
+
+    return value;
+  }
+
+  private parseJsonObject(
+    value: string,
+    errorMessage: string,
+  ): Record<string, unknown> {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+
+      return this.requireRecord(parsed, errorMessage);
+    } catch (error) {
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+
+      throw new BadRequestException(errorMessage);
+    }
+  }
+
+  private requireRecord(
+    value: unknown,
+    errorMessage: string,
+  ): Record<string, unknown> {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+      throw new BadRequestException(errorMessage);
+    }
+
+    return value as Record<string, unknown>;
   }
 }
