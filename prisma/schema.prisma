@@ -434,3 +434,23 @@ model VerificationResult {
   @@index([finalResult])
   @@index([verifiedAt])
 }
+
+model AuditLog {
+  id             String  @id @default(uuid())
+  actorId        String?
+  organizationId String?
+  action         String
+  resourceType   String?
+  resourceId     String?
+  metadata       Json?
+  ipAddress      String?
+  userAgent      String?
+
+  createdAt DateTime @default(now())
+
+  @@index([actorId])
+  @@index([organizationId])
+  @@index([action])
+  @@index([resourceType, resourceId])
+  @@index([createdAt])
+}

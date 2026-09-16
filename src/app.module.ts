@@ -18,6 +18,7 @@ import { ApplicationsModule } from './applications/applications.module';
 import { RedisModule } from './redis/redis.module';
 import { VerificationRequestsModule } from './verification-requests/verification-requests.module';
 import { VerificationModule } from './verification/verification.module';
+import { AuditModule } from './audit/audit.module';
 
 @Module({
   imports: [
@@ -41,6 +42,7 @@ import { VerificationModule } from './verification/verification.module';
     RedisModule,
     VerificationRequestsModule,
     VerificationModule,
+    AuditModule,
   ],
 })
 export class AppModule {}
