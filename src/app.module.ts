@@ -17,6 +17,7 @@ import { JobsModule } from './jobs/jobs.module';
 import { ApplicationsModule } from './applications/applications.module';
 import { RedisModule } from './redis/redis.module';
 import { VerificationRequestsModule } from './verification-requests/verification-requests.module';
+import { VerificationModule } from './verification/verification.module';
 
 @Module({
   imports: [
@@ -39,6 +40,7 @@ import { VerificationRequestsModule } from './verification-requests/verification
     ApplicationsModule,
     RedisModule,
     VerificationRequestsModule,
+    VerificationModule,
   ],
 })
 export class AppModule {}
