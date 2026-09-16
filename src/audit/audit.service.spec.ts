@@ -9,6 +9,8 @@ describe('AuditService', () => {
       create: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 
       findMany: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+
+      count: jest.fn<(...args: unknown[]) => Promise<number>>(),
     },
   };
 
@@ -58,17 +60,47 @@ describe('AuditService', () => {
     });
   });
 
-  it('should list audit logs newest first', async () => {
-    mockPrismaService.auditLog.findMany.mockResolvedValue([]);
+  it('should return paginated audit logs', async () => {
+    mockPrismaService.auditLog.findMany.mockResolvedValue([
+      {
+        id: 'audit-1',
+        action: 'CREDENTIAL_VERIFIED',
+      },
+    ]);
 
-    const result = await service.findAll();
+    mockPrismaService.auditLog.count.mockResolvedValue(21);
+
+    const result = await service.findAll({
+      page: 2,
+      limit: 10,
+      action: 'CREDENTIAL_VERIFIED',
+      organizationId: 'bank-id',
+    });
 
     expect(mockPrismaService.auditLog.findMany).toHaveBeenCalledWith({
+      where: {
+        action: 'CREDENTIAL_VERIFIED',
+        organizationId: 'bank-id',
+      },
       orderBy: {
         createdAt: 'desc',
       },
+      skip: 10,
+      take: 10,
     });
 
-    expect(result).toEqual([]);
+    expect(mockPrismaService.auditLog.count).toHaveBeenCalledWith({
+      where: {
+        action: 'CREDENTIAL_VERIFIED',
+        organizationId: 'bank-id',
+      },
+    });
+
+    expect(result.meta).toEqual({
+      page: 2,
+      limit: 10,
+      total: 21,
+      totalPages: 3,
+    });
   });
 });

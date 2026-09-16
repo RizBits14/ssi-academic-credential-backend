@@ -14,6 +14,13 @@ export interface CreateAuditLogInput {
   userAgent?: string;
 }
 
+export interface FindAuditLogsInput {
+  page: number;
+  limit: number;
+  action?: string;
+  organizationId?: string;
+}
+
 @Injectable()
 export class AuditService {
   constructor(private readonly prisma: PrismaService) {}
@@ -56,11 +63,42 @@ export class AuditService {
     });
   }
 
-  async findAll() {
-    return this.prisma.auditLog.findMany({
-      orderBy: {
-        createdAt: 'desc',
+  async findAll(input: FindAuditLogsInput) {
+    const where: Prisma.AuditLogWhereInput = {};
+
+    if (input.action) {
+      where.action = input.action;
+    }
+
+    if (input.organizationId) {
+      where.organizationId = input.organizationId;
+    }
+
+    const skip = (input.page - 1) * input.limit;
+
+    const [data, total] = await Promise.all([
+      this.prisma.auditLog.findMany({
+        where,
+        orderBy: {
+          createdAt: 'desc',
+        },
+        skip,
+        take: input.limit,
+      }),
+
+      this.prisma.auditLog.count({
+        where,
+      }),
+    ]);
+
+    return {
+      data,
+      meta: {
+        page: input.page,
+        limit: input.limit,
+        total,
+        totalPages: total === 0 ? 0 : Math.ceil(total / input.limit),
       },
-    });
+    };
   }
 }
