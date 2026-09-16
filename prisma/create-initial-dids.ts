@@ -1,8 +1,9 @@
 import 'dotenv/config';
 
-import { NestFactory } from '@nestjs/core';
+import { ConfigService } from '@nestjs/config';
 
-import { AppModule } from '../src/app.module';
+import { EncryptionService } from '../src/crypto/encryption.service';
+import { SignatureService } from '../src/crypto/signature.service';
 import { DidService } from '../src/did/did.service';
 import { DidOwnerType } from '../src/generated/prisma/enums';
 import { PrismaService } from '../src/prisma/prisma.service';
@@ -10,15 +11,19 @@ import { PrismaService } from '../src/prisma/prisma.service';
 async function main() {
   console.log('Starting initial DID setup...');
 
-  const app = await NestFactory.createApplicationContext(AppModule, {
-    logger: ['error', 'warn'],
-    abortOnError: false,
-  });
+  const configService = new ConfigService(process.env);
+  const prisma = new PrismaService(configService);
+  const encryptionService = new EncryptionService(configService);
+  const signatureService = new SignatureService();
+  const didService = new DidService(
+    prisma,
+    encryptionService,
+    signatureService,
+  );
+
+  await prisma.$connect();
 
   try {
-    const prisma = app.get(PrismaService);
-    const didService = app.get(DidService);
-
     const university = await prisma.organization.findUnique({
       where: {
         slug: 'example-university',
@@ -78,7 +83,7 @@ async function main() {
     console.log(`Bank DID: ${bankDid.did}`);
     console.log(`Holder DID: ${holderDid.did}`);
   } finally {
-    await app.close();
+    await prisma.$disconnect();
   }
 }
 
@@ -86,7 +91,7 @@ main()
   .then(() => {
     console.log('DID setup script finished.');
   })
-  .catch((error) => {
+  .catch((error: unknown) => {
     console.error('DID setup failed:');
     console.error(error);
     process.exitCode = 1;
