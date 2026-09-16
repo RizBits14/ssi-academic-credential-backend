@@ -25,7 +25,9 @@
     "db:seed": "tsx prisma/seed.ts",
     "setup:dids": "tsx prisma/create-initial-dids.ts",
     "db:setup": "npm run prisma:generate && npm run db:migrate && npm run db:seed && npm run setup:dids",
-    "verify": "npm run format:check && npm run build && npm run lint:check && npm test && npm run test:e2e"
+    "verify": "npm run format:check && npm run build && npm run lint:check && npm test && npm run test:e2e",
+    "db:clean": "tsx prisma/clean-database.ts",
+    "db:clean:seed": "npm run db:clean && npm run db:seed && npm run setup:dids"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",
