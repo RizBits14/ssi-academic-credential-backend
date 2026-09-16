@@ -16,6 +16,8 @@ import {
 import { OrganizationsService } from '../organizations/organizations.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CredentialsService } from './credentials.service';
+import type { Prisma } from '../generated/prisma/client';
+import { createPaginationMeta } from '../common/utils/pagination.util';
 
 interface PrepareCredentialIssuanceInput {
   issuerOrganizationId: string;
@@ -223,5 +225,81 @@ export class CredentialIssuanceService {
         signedCredential: prepared.signedCredential,
       };
     });
+  }
+
+  async findIssued(input: {
+    issuerOrganizationId: string;
+    page: number;
+    limit: number;
+    status?: CredentialStatus;
+    holderId?: string;
+    issuedFrom?: string;
+    issuedTo?: string;
+  }) {
+    const where: Prisma.CredentialWhereInput = {
+      issuerOrganizationId: input.issuerOrganizationId,
+    };
+
+    if (input.status) {
+      where.status = input.status;
+    }
+
+    if (input.holderId) {
+      where.holderId = input.holderId;
+    }
+
+    if (input.issuedFrom || input.issuedTo) {
+      where.issuedAt = {
+        ...(input.issuedFrom
+          ? {
+              gte: new Date(input.issuedFrom),
+            }
+          : {}),
+
+        ...(input.issuedTo
+          ? {
+              lte: new Date(input.issuedTo),
+            }
+          : {}),
+      };
+    }
+
+    const skip = (input.page - 1) * input.limit;
+
+    const [data, total] = await Promise.all([
+      this.prisma.credential.findMany({
+        where,
+
+        include: {
+          holder: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+            },
+          },
+
+          schema: true,
+          academicRecord: true,
+        },
+
+        orderBy: {
+          issuedAt: 'desc',
+        },
+
+        skip,
+        take: input.limit,
+      }),
+
+      this.prisma.credential.count({
+        where,
+      }),
+    ]);
+
+    return {
+      data,
+
+      meta: createPaginationMeta(input.page, input.limit, total),
+    };
   }
 }

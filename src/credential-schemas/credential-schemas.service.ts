@@ -5,6 +5,8 @@ import {
 } from '@nestjs/common';
 import { OrganizationType } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
+import type { Prisma } from '../generated/prisma/client';
+import { createPaginationMeta } from '../common/utils/pagination.util';
 
 interface CredentialSchemaDefinition {
   name: string;
@@ -93,6 +95,43 @@ export class CredentialSchemasService {
         createdAt: 'desc',
       },
     });
+  }
+
+  async findByOrganizationPaginated(input: {
+    organizationId: string;
+    page: number;
+    limit: number;
+    status?: string;
+  }) {
+    const where: Prisma.CredentialSchemaWhereInput = {
+      organizationId: input.organizationId,
+    };
+
+    if (input.status) {
+      where.status = input.status;
+    }
+
+    const skip = (input.page - 1) * input.limit;
+
+    const [data, total] = await Promise.all([
+      this.prisma.credentialSchema.findMany({
+        where,
+        orderBy: {
+          createdAt: 'desc',
+        },
+        skip,
+        take: input.limit,
+      }),
+
+      this.prisma.credentialSchema.count({
+        where,
+      }),
+    ]);
+
+    return {
+      data,
+      meta: createPaginationMeta(input.page, input.limit, total),
+    };
   }
 
   validateClaims(schemaJson: unknown, claims: Record<string, unknown>): void {

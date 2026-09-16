@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Req, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, Req, UseGuards, Query } from '@nestjs/common';
 
 import type { AuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -6,6 +6,8 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { UserRole } from '../generated/prisma/enums';
 import { WalletService } from './wallet.service';
+import { ListWalletCredentialsDto } from './dto/list-wallet-credentials.dto';
+import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 
 @Controller('wallet')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -14,35 +16,59 @@ export class WalletController {
   constructor(private readonly walletService: WalletService) {}
 
   @Get('credentials')
-  async findAll(@Req() request: AuthenticatedRequest) {
-    const walletCredentials = await this.walletService.findByHolder(
-      request.user.sub,
-    );
+  async findAll(
+    @Req() request: AuthenticatedRequest,
+    @Query() query: ListWalletCredentialsDto,
+  ) {
+    const result = await this.walletService.findByHolderPaginated({
+      holderId: request.user.sub,
+      page: query.page,
+      limit: query.limit,
+      status: query.status,
+      issuedFrom: query.issuedFrom,
+      issuedTo: query.issuedTo,
+    });
 
-    return walletCredentials.map((walletCredential) => ({
-      id: walletCredential.id,
-      credentialId: walletCredential.credentialId,
-      createdAt: walletCredential.createdAt,
-      updatedAt: walletCredential.updatedAt,
-      credential: {
-        id: walletCredential.credential.id,
-        vcId: walletCredential.credential.vcId,
-        issuerDid: walletCredential.credential.issuerDid,
-        holderDid: walletCredential.credential.holderDid,
-        status: walletCredential.credential.status,
-        issuedAt: walletCredential.credential.issuedAt,
-        expiresAt: walletCredential.credential.expiresAt,
-        issuerOrganization: {
-          id: walletCredential.credential.issuerOrganization.id,
-          name: walletCredential.credential.issuerOrganization.name,
+    return {
+      data: result.data.map((walletCredential) => ({
+        id: walletCredential.id,
+        credentialId: walletCredential.credentialId,
+        createdAt: walletCredential.createdAt,
+        updatedAt: walletCredential.updatedAt,
+
+        credential: {
+          id: walletCredential.credential.id,
+
+          vcId: walletCredential.credential.vcId,
+
+          issuerDid: walletCredential.credential.issuerDid,
+
+          holderDid: walletCredential.credential.holderDid,
+
+          status: walletCredential.credential.status,
+
+          issuedAt: walletCredential.credential.issuedAt,
+
+          expiresAt: walletCredential.credential.expiresAt,
+
+          issuerOrganization: {
+            id: walletCredential.credential.issuerOrganization.id,
+
+            name: walletCredential.credential.issuerOrganization.name,
+          },
+
+          schema: {
+            id: walletCredential.credential.schema.id,
+
+            name: walletCredential.credential.schema.name,
+
+            version: walletCredential.credential.schema.version,
+          },
         },
-        schema: {
-          id: walletCredential.credential.schema.id,
-          name: walletCredential.credential.schema.name,
-          version: walletCredential.credential.schema.version,
-        },
-      },
-    }));
+      })),
+
+      meta: result.meta,
+    };
   }
 
   @Get('credentials/:id')
@@ -59,7 +85,14 @@ export class WalletController {
   }
 
   @Get('requests')
-  async findPendingRequests(@Req() request: AuthenticatedRequest) {
-    return this.walletService.findPendingRequests(request.user.sub);
+  async findPendingRequests(
+    @Req() request: AuthenticatedRequest,
+    @Query() query: PaginationQueryDto,
+  ) {
+    return this.walletService.findPendingRequestsPaginated({
+      holderId: request.user.sub,
+      page: query.page,
+      limit: query.limit,
+    });
   }
 }

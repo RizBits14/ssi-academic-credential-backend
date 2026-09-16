@@ -2,6 +2,8 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 
 import { AcademicRecordStatus } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
+import type { Prisma } from '../generated/prisma/client';
+import { createPaginationMeta } from '../common/utils/pagination.util';
 
 interface CreateAcademicRecordInput {
   universityId: string;
@@ -92,5 +94,52 @@ export class AcademicRecordsService {
       },
       data: input,
     });
+  }
+
+  async findByUniversityPaginated(input: {
+    universityId: string;
+    page: number;
+    limit: number;
+    status?: AcademicRecordStatus;
+    holderId?: string;
+    studentId?: string;
+  }) {
+    const where: Prisma.AcademicRecordWhereInput = {
+      universityId: input.universityId,
+    };
+
+    if (input.status) {
+      where.status = input.status;
+    }
+
+    if (input.holderId) {
+      where.holderId = input.holderId;
+    }
+
+    if (input.studentId) {
+      where.studentId = input.studentId;
+    }
+
+    const skip = (input.page - 1) * input.limit;
+
+    const [data, total] = await Promise.all([
+      this.prisma.academicRecord.findMany({
+        where,
+        orderBy: {
+          createdAt: 'desc',
+        },
+        skip,
+        take: input.limit,
+      }),
+
+      this.prisma.academicRecord.count({
+        where,
+      }),
+    ]);
+
+    return {
+      data,
+      meta: createPaginationMeta(input.page, input.limit, total),
+    };
   }
 }

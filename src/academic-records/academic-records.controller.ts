@@ -8,6 +8,7 @@ import {
   Post,
   Req,
   UseGuards,
+  Query,
 } from '@nestjs/common';
 
 import type { AuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
@@ -19,6 +20,7 @@ import { OrganizationsService } from '../organizations/organizations.service';
 import { AcademicRecordsService } from './academic-records.service';
 import { CreateAcademicRecordDto } from './dto/create-academic-record.dto';
 import { UpdateAcademicRecordDto } from './dto/update-academic-record.dto';
+import { ListAcademicRecordsDto } from './dto/list-academic-records.dto';
 
 @Controller('academic-records')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -54,10 +56,21 @@ export class AcademicRecordsController {
   }
 
   @Get()
-  async findAll(@Req() request: AuthenticatedRequest) {
+  @Get()
+  async findAll(
+    @Req() request: AuthenticatedRequest,
+    @Query() query: ListAcademicRecordsDto,
+  ) {
     const universityId = await this.getUniversityId(request.user.sub);
 
-    return this.academicRecordsService.findByUniversity(universityId);
+    return this.academicRecordsService.findByUniversityPaginated({
+      universityId,
+      page: query.page,
+      limit: query.limit,
+      status: query.status,
+      holderId: query.holderId,
+      studentId: query.studentId,
+    });
   }
 
   @Get(':id')

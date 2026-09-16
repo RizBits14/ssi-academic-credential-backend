@@ -1,5 +1,6 @@
 import { Controller, Get } from '@nestjs/common';
 import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { RawResponse } from '../common/decorators/raw-response.decorator';
 
 import { HealthService } from './health.service';
 
@@ -8,6 +9,7 @@ import { HealthService } from './health.service';
 export class HealthController {
   constructor(private readonly healthService: HealthService) {}
 
+  @RawResponse()
   @Get()
   @ApiOperation({
     summary: 'Check API, PostgreSQL, and Redis health',

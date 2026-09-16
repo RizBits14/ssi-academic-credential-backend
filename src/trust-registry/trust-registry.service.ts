@@ -13,6 +13,8 @@ import {
 } from '../generated/prisma/enums';
 import { OrganizationsService } from '../organizations/organizations.service';
 import { PrismaService } from '../prisma/prisma.service';
+import type { Prisma } from '../generated/prisma/client';
+import { createPaginationMeta } from '../common/utils/pagination.util';
 
 interface AddTrustedIssuerInput {
   organizationId: string;
@@ -195,5 +197,59 @@ export class TrustRegistryService {
 
       return updated;
     });
+  }
+
+  async findAllPaginated(input: {
+    page: number;
+    limit: number;
+    status?: TrustedIssuerStatus;
+    organizationId?: string;
+  }) {
+    const where: Prisma.TrustedIssuerWhereInput = {};
+
+    if (input.status) {
+      where.status = input.status;
+    }
+
+    if (input.organizationId) {
+      where.organizationId = input.organizationId;
+    }
+
+    const skip = (input.page - 1) * input.limit;
+
+    const [data, total] = await Promise.all([
+      this.prisma.trustedIssuer.findMany({
+        where,
+
+        include: {
+          organization: true,
+
+          approvedByUser: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              role: true,
+            },
+          },
+        },
+
+        orderBy: {
+          createdAt: 'desc',
+        },
+
+        skip,
+        take: input.limit,
+      }),
+
+      this.prisma.trustedIssuer.count({
+        where,
+      }),
+    ]);
+
+    return {
+      data,
+      meta: createPaginationMeta(input.page, input.limit, total),
+    };
   }
 }

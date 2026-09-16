@@ -9,6 +9,7 @@ import {
   Post,
   Req,
   UseGuards,
+  Query,
 } from '@nestjs/common';
 
 import type { AuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
@@ -19,6 +20,7 @@ import { OrganizationType, UserRole } from '../generated/prisma/enums';
 import { OrganizationsService } from '../organizations/organizations.service';
 import { ApplicationsService } from './applications.service';
 import { CreateApplicationDto } from './dto/create-application.dto';
+import { ListApplicationsDto } from './dto/list-applications.dto';
 
 @Controller('applications')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -42,8 +44,18 @@ export class ApplicationsController {
 
   @Get('me')
   @Roles(UserRole.HOLDER)
-  async findMine(@Req() request: AuthenticatedRequest) {
-    return this.applicationsService.findByHolder(request.user.sub);
+  async findMine(
+    @Req() request: AuthenticatedRequest,
+    @Query() query: ListApplicationsDto,
+  ) {
+    return this.applicationsService.findByHolderPaginated({
+      holderId: request.user.sub,
+      page: query.page,
+      limit: query.limit,
+      status: query.status,
+      educationVerificationStatus: query.educationVerificationStatus,
+      jobId: query.jobId,
+    });
   }
 
   @Get(':id')

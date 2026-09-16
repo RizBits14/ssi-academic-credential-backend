@@ -6,6 +6,7 @@ import {
   Post,
   Req,
   UseGuards,
+  Query,
 } from '@nestjs/common';
 
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -16,6 +17,7 @@ import { OrganizationType, UserRole } from '../generated/prisma/enums';
 import { OrganizationsService } from '../organizations/organizations.service';
 import { CredentialSchemasService } from './credential-schemas.service';
 import { CreateCredentialSchemaDto } from './dto/create-credential-schema.dto';
+import { ListCredentialSchemasDto } from './dto/list-credential-schemas.dto';
 
 @Controller('credential-schemas')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -43,10 +45,19 @@ export class CredentialSchemasController {
   }
 
   @Get()
-  async findAll(@Req() request: AuthenticatedRequest) {
+  @Get()
+  async findAll(
+    @Req() request: AuthenticatedRequest,
+    @Query() query: ListCredentialSchemasDto,
+  ) {
     const organizationId = await this.getUniversityId(request.user.sub);
 
-    return this.credentialSchemasService.findByOrganization(organizationId);
+    return this.credentialSchemasService.findByOrganizationPaginated({
+      organizationId,
+      page: query.page,
+      limit: query.limit,
+      status: query.status,
+    });
   }
 
   private async getUniversityId(userId: string): Promise<string> {

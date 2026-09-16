@@ -1,9 +1,11 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { randomUUID } from 'node:crypto';
 import { LoggerModule } from 'nestjs-pino';
+import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
+import { ApiResponseInterceptor } from './common/interceptors/api-response.interceptor';
 
 import { AcademicRecordsModule } from './academic-records/academic-records.module';
 import { ApplicationsModule } from './applications/applications.module';
@@ -101,6 +103,16 @@ import { WalletModule } from './wallet/wallet.module';
     {
       provide: APP_GUARD,
       useClass: ThrottlerGuard,
+    },
+
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: ApiResponseInterceptor,
+    },
+
+    {
+      provide: APP_FILTER,
+      useClass: GlobalExceptionFilter,
     },
   ],
 })

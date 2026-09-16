@@ -9,6 +9,7 @@ import {
   Post,
   Req,
   UseGuards,
+  Query,
 } from '@nestjs/common';
 
 import type { AuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
@@ -20,6 +21,7 @@ import { OrganizationsService } from '../organizations/organizations.service';
 import { CreateJobDto } from './dto/create-job.dto';
 import { JobsService } from './jobs.service';
 import { UpdateJobDto } from './dto/update-job.dto';
+import { ListJobsDto } from './dto/list-jobs.dto';
 
 @Controller('jobs')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -46,8 +48,13 @@ export class JobsController {
   }
 
   @Get()
-  async findAll() {
-    return this.jobsService.findAll();
+  async findAll(@Query() query: ListJobsDto) {
+    return this.jobsService.findAllPaginated({
+      page: query.page,
+      limit: query.limit,
+      status: query.status,
+      bankId: query.bankId,
+    });
   }
 
   @Patch(':id')

@@ -8,6 +8,7 @@ import {
   Post,
   Req,
   UseGuards,
+  Query,
 } from '@nestjs/common';
 
 import type { AuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
@@ -20,6 +21,7 @@ import { CredentialIssuanceService } from './credential-issuance.service';
 import { CredentialStatusService } from './credential-status.service';
 import { ChangeCredentialStatusDto } from './dto/change-credential-status.dto';
 import { IssueCredentialDto } from './dto/issue-credential.dto';
+import { ListIssuedCredentialsDto } from './dto/list-issued-credentials.dto';
 
 @Controller('credentials')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -90,6 +92,24 @@ export class CredentialsController {
       credentialId: id,
       issuerOrganizationId: universityId,
       changedBy: request.user.sub,
+    });
+  }
+
+  @Get('issued')
+  async findIssued(
+    @Req() request: AuthenticatedRequest,
+    @Query() query: ListIssuedCredentialsDto,
+  ) {
+    const universityId = await this.getUniversityId(request.user.sub);
+
+    return this.credentialIssuanceService.findIssued({
+      issuerOrganizationId: universityId,
+      page: query.page,
+      limit: query.limit,
+      status: query.status,
+      holderId: query.holderId,
+      issuedFrom: query.issuedFrom,
+      issuedTo: query.issuedTo,
     });
   }
 

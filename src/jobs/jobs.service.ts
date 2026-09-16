@@ -6,6 +6,8 @@ import {
 
 import { OrganizationType } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
+import type { Prisma } from '../generated/prisma/client';
+import { createPaginationMeta } from '../common/utils/pagination.util';
 
 interface CreateJobInput {
   bankId: string;
@@ -132,5 +134,50 @@ export class JobsService {
         bank: true,
       },
     });
+  }
+
+  async findAllPaginated(input: {
+    page: number;
+    limit: number;
+    status?: string;
+    bankId?: string;
+  }) {
+    const where: Prisma.JobWhereInput = {};
+
+    if (input.status) {
+      where.status = input.status;
+    }
+
+    if (input.bankId) {
+      where.bankId = input.bankId;
+    }
+
+    const skip = (input.page - 1) * input.limit;
+
+    const [data, total] = await Promise.all([
+      this.prisma.job.findMany({
+        where,
+
+        include: {
+          bank: true,
+        },
+
+        orderBy: {
+          createdAt: 'desc',
+        },
+
+        skip,
+        take: input.limit,
+      }),
+
+      this.prisma.job.count({
+        where,
+      }),
+    ]);
+
+    return {
+      data,
+      meta: createPaginationMeta(input.page, input.limit, total),
+    };
   }
 }

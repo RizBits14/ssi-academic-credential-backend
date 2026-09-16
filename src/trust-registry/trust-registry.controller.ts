@@ -8,6 +8,7 @@ import {
   Post,
   Req,
   UseGuards,
+  Query,
 } from '@nestjs/common';
 
 import type { AuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
@@ -17,6 +18,7 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { UserRole } from '../generated/prisma/enums';
 import { CreateTrustedIssuerDto } from './dto/create-trusted-issuer.dto';
 import { TrustRegistryService } from './trust-registry.service';
+import { ListTrustedIssuersDto } from './dto/list-trusted-issuers.dto';
 
 @Controller('trust-registry/issuers')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -37,8 +39,13 @@ export class TrustRegistryController {
   }
 
   @Get()
-  async findAll() {
-    return this.trustRegistryService.findAll();
+  async findAll(@Query() query: ListTrustedIssuersDto) {
+    return this.trustRegistryService.findAllPaginated({
+      page: query.page,
+      limit: query.limit,
+      status: query.status,
+      organizationId: query.organizationId,
+    });
   }
 
   @Get(':did')
