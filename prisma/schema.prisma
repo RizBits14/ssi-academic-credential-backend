@@ -82,6 +82,11 @@ enum VerificationRequestStatus {
   FAILED
 }
 
+enum VerificationFinalResult {
+  VERIFIED
+  FAILED
+}
+
 model User {
   id           String   @id @default(uuid())
   name         String
@@ -343,6 +348,7 @@ model Application {
   holder User @relation(fields: [holderId], references: [id], onDelete: Restrict)
 
   verificationRequests VerificationRequest[]
+  verificationResults  VerificationResult[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -389,13 +395,42 @@ model Presentation {
   presentationHash String
   holderProof      Json
 
-  request    VerificationRequest @relation(fields: [requestId], references: [id], onDelete: Restrict)
-  credential Credential          @relation(fields: [credentialId], references: [id], onDelete: Restrict)
-  holder     User                @relation(fields: [holderId], references: [id], onDelete: Restrict)
+  request            VerificationRequest @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  credential         Credential          @relation(fields: [credentialId], references: [id], onDelete: Restrict)
+  holder             User                @relation(fields: [holderId], references: [id], onDelete: Restrict)
+  verificationResult VerificationResult?
 
   createdAt DateTime @default(now())
 
   @@index([credentialId])
   @@index([holderId])
   @@index([createdAt])
+}
+
+model VerificationResult {
+  id             String @id @default(uuid())
+  presentationId String @unique
+  applicationId  String
+
+  requestValid          Boolean
+  nonceValid            Boolean
+  holderProofValid      Boolean
+  hashValid             Boolean
+  issuerSignatureValid  Boolean
+  issuerTrusted         Boolean
+  credentialStatusValid Boolean
+  schemaValid           Boolean
+  holderMatches         Boolean
+  claimsValid           Boolean
+
+  finalResult   VerificationFinalResult
+  failureReason String?
+  verifiedAt    DateTime                @default(now())
+
+  presentation Presentation @relation(fields: [presentationId], references: [id], onDelete: Restrict)
+  application  Application  @relation(fields: [applicationId], references: [id], onDelete: Restrict)
+
+  @@index([applicationId])
+  @@index([finalResult])
+  @@index([verifiedAt])
 }
