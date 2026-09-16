@@ -33,7 +33,11 @@ export class VerificationController {
   ) {
     const bankId = await this.getBankId(request.user.sub);
 
-    return this.verificationService.verifyPresentation(presentationId, bankId);
+    return this.verificationService.verifyPresentation(
+      presentationId,
+      bankId,
+      request.user.sub,
+    );
   }
 
   private async getBankId(userId: string): Promise<string> {

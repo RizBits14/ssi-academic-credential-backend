@@ -460,7 +460,11 @@ export class VerificationService {
     };
   }
 
-  async verifyPresentation(presentationId: string, bankId: string) {
+  async verifyPresentation(
+    presentationId: string,
+    bankId: string,
+    actorId: string,
+  ) {
     const context = await this.validateCredentialChecks(presentationId);
 
     const { presentation, request } = context;
@@ -506,6 +510,21 @@ export class VerificationService {
           finalResult: VerificationFinalResult.VERIFIED,
 
           failureReason: null,
+        },
+      });
+
+      await transaction.auditLog.create({
+        data: {
+          actorId,
+          organizationId: bankId,
+          action: 'CREDENTIAL_VERIFIED',
+          resourceType: 'Presentation',
+          resourceId: presentation.id,
+          metadata: {
+            verificationResultId: verificationResult.id,
+            applicationId: request.applicationId,
+            verificationRequestId: request.id,
+          },
         },
       });
 
