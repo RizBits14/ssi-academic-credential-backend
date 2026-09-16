@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 
@@ -11,7 +12,7 @@ import { CredentialSchemasService } from '../credential-schemas/credential-schem
 import { EncryptionService } from '../crypto/encryption.service';
 import { SignatureService } from '../crypto/signature.service';
 import { DidService } from '../did/did.service';
-import type { Prisma } from '../generated/prisma/client';
+import { Prisma } from '../generated/prisma/client';
 import {
   CredentialStatus,
   EducationVerificationStatus,
@@ -465,24 +466,17 @@ export class VerificationService {
     bankId: string,
     actorId: string,
   ) {
-    const context = await this.validateCredentialChecks(presentationId);
+    const requestContext = await this.validateRequestContext(presentationId);
 
-    const { presentation, request } = context;
-
-    if (request.application.job.bankId !== bankId) {
+    if (requestContext.request.application.job.bankId !== bankId) {
       throw new ForbiddenException(
         'This verification request does not belong to your bank',
       );
     }
 
-    const disclosedClaims = this.requireRecord(
-      presentation.disclosedClaims,
-      'Disclosed claims are invalid',
-    );
-
     const existingResult = await this.prisma.verificationResult.findUnique({
       where: {
-        presentationId: presentation.id,
+        presentationId,
       },
     });
 
@@ -490,10 +484,165 @@ export class VerificationService {
       throw new ConflictException('Presentation has already been verified');
     }
 
+    let context: Awaited<
+      ReturnType<VerificationService['validateCredentialChecks']>
+    >;
+
+    try {
+      context = await this.validateCredentialChecks(presentationId);
+    } catch (error) {
+      if (!(
+        error instanceof BadRequestException ||
+        error instanceof NotFoundException
+      )) {
+        throw error;
+      }
+
+      const latestRequest = await this.prisma.verificationRequest.findUnique({
+        where: {
+          id: requestContext.request.id,
+        },
+        select: {
+          status: true,
+        },
+      });
+
+      if (latestRequest?.status === VerificationRequestStatus.EXPIRED) {
+        throw error;
+      }
+
+      const reason = this.getVerificationFailureReason(error);
+
+      const failedChecks = this.buildFailedVerificationChecks(reason);
+
+      const failedResult = await this.prisma.$transaction(
+        async (transaction) => {
+          const verificationResult =
+            await transaction.verificationResult.create({
+              data: {
+                presentationId: requestContext.presentation.id,
+
+                applicationId: requestContext.request.applicationId,
+
+                requestValid: failedChecks.requestValid,
+
+                nonceValid: failedChecks.nonceValid,
+
+                holderProofValid: failedChecks.holderProofValid,
+
+                hashValid: failedChecks.hashValid,
+
+                issuerSignatureValid: failedChecks.issuerSignatureValid,
+
+                issuerTrusted: failedChecks.issuerTrusted,
+
+                credentialStatusValid: failedChecks.credentialStatusValid,
+
+                schemaValid: failedChecks.schemaValid,
+
+                holderMatches: failedChecks.holderMatches,
+
+                claimsValid: failedChecks.claimsValid,
+
+                finalResult: VerificationFinalResult.FAILED,
+
+                failureReason: reason,
+              },
+            });
+
+          await transaction.verificationRequest.update({
+            where: {
+              id: requestContext.request.id,
+            },
+            data: {
+              status: VerificationRequestStatus.FAILED,
+            },
+          });
+
+          await transaction.application.update({
+            where: {
+              id: requestContext.request.applicationId,
+            },
+            data: {
+              educationVerificationStatus: EducationVerificationStatus.FAILED,
+
+              verifiedAcademicData: Prisma.DbNull,
+            },
+          });
+
+          await transaction.auditLog.create({
+            data: {
+              actorId,
+              organizationId: bankId,
+              action: 'VERIFICATION_FAILED',
+              resourceType: 'Presentation',
+              resourceId: requestContext.presentation.id,
+
+              metadata: {
+                verificationResultId: verificationResult.id,
+
+                applicationId: requestContext.request.applicationId,
+
+                verificationRequestId: requestContext.request.id,
+
+                reason,
+              },
+            },
+          });
+
+          return verificationResult;
+        },
+      );
+
+      await this.redis.delete(
+        `verification-request:${requestContext.request.id}`,
+      );
+
+      throw new UnprocessableEntityException({
+        verified: false,
+
+        verificationResultId: failedResult.id,
+
+        checks: {
+          requestValid: failedChecks.requestValid,
+
+          nonceValid: failedChecks.nonceValid,
+
+          holderProofValid: failedChecks.holderProofValid,
+
+          credentialHashValid: failedChecks.hashValid,
+
+          issuerSignatureValid: failedChecks.issuerSignatureValid,
+
+          issuerTrusted: failedChecks.issuerTrusted,
+
+          credentialActive: failedChecks.credentialStatusValid,
+
+          credentialNotExpired: failedChecks.credentialNotExpired,
+
+          schemaValid: failedChecks.schemaValid,
+
+          holderMatches: failedChecks.holderMatches,
+
+          claimsValid: failedChecks.claimsValid,
+        },
+
+        reason,
+      });
+    }
+
+    const { presentation, request } = context;
+
+    const disclosedClaims = this.requireRecord(
+      presentation.disclosedClaims,
+      'Disclosed claims are invalid',
+    );
+
     const result = await this.prisma.$transaction(async (transaction) => {
       const verificationResult = await transaction.verificationResult.create({
         data: {
           presentationId: presentation.id,
+
           applicationId: request.applicationId,
 
           requestValid: true,
@@ -520,9 +669,12 @@ export class VerificationService {
           action: 'CREDENTIAL_VERIFIED',
           resourceType: 'Presentation',
           resourceId: presentation.id,
+
           metadata: {
             verificationResultId: verificationResult.id,
+
             applicationId: request.applicationId,
+
             verificationRequestId: request.id,
           },
         },
@@ -574,6 +726,127 @@ export class VerificationService {
 
       verifiedClaims: disclosedClaims,
     };
+  }
+
+  private getVerificationFailureReason(
+    error: BadRequestException | NotFoundException,
+  ): string {
+    const response = error.getResponse();
+
+    if (typeof response === 'string') {
+      return response;
+    }
+
+    if (typeof response === 'object' && response !== null) {
+      const message = (
+        response as {
+          message?: unknown;
+        }
+      ).message;
+
+      if (typeof message === 'string') {
+        return message;
+      }
+
+      if (
+        Array.isArray(message) &&
+        message.every((item) => typeof item === 'string')
+      ) {
+        return message.join(', ');
+      }
+    }
+
+    return 'Credential verification failed';
+  }
+
+  private buildFailedVerificationChecks(reason: string) {
+    const checks = {
+      requestValid: true,
+      nonceValid: true,
+      holderProofValid: false,
+      hashValid: false,
+      issuerSignatureValid: false,
+      issuerTrusted: false,
+      credentialStatusValid: false,
+      credentialNotExpired: false,
+      schemaValid: false,
+      holderMatches: true,
+      claimsValid: false,
+    };
+
+    if (
+      reason.includes('Holder proof') ||
+      reason.includes('Holder verification method')
+    ) {
+      return checks;
+    }
+
+    checks.holderProofValid = true;
+
+    if (
+      reason.includes('Credential hash') ||
+      reason.includes('Stored credential') ||
+      reason.includes('Credential not found in holder wallet')
+    ) {
+      return checks;
+    }
+
+    checks.hashValid = true;
+
+    if (
+      reason.includes('Issuer proof') ||
+      reason.includes('Issuer verification method') ||
+      reason.includes('Issuer signature')
+    ) {
+      return checks;
+    }
+
+    checks.issuerSignatureValid = true;
+
+    if (reason.includes('issuer is not trusted')) {
+      return checks;
+    }
+
+    checks.issuerTrusted = true;
+
+    if (
+      reason.includes('revoked') ||
+      reason.includes('suspended') ||
+      reason.includes('not active')
+    ) {
+      checks.credentialNotExpired = true;
+
+      return checks;
+    }
+
+    if (reason.includes('expired')) {
+      return checks;
+    }
+
+    checks.credentialStatusValid = true;
+    checks.credentialNotExpired = true;
+
+    if (
+      reason.includes('schema') ||
+      reason.includes('Credential subject is invalid') ||
+      reason.includes('Credential issuer is invalid') ||
+      reason.includes('issuer DID does not match') ||
+      reason.includes('metadata')
+    ) {
+      return checks;
+    }
+
+    checks.schemaValid = true;
+
+    if (reason.includes('holder DID does not match')) {
+      checks.holderMatches = false;
+
+      return checks;
+    }
+
+    checks.claimsValid = false;
+
+    return checks;
   }
 
   private requireStringArray(value: unknown, errorMessage: string): string[] {
