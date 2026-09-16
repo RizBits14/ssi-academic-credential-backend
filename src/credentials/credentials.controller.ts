@@ -43,6 +43,7 @@ export class CredentialsController {
       academicRecordId: dto.academicRecordId,
       schemaId: dto.schemaId,
       expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : undefined,
+      actorId: request.user.sub,
     });
   }
 

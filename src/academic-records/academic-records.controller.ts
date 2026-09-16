@@ -4,14 +4,14 @@ import {
   Get,
   NotFoundException,
   Param,
+  Patch,
   Post,
   Req,
   UseGuards,
-  Patch,
 } from '@nestjs/common';
 
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import type { AuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { OrganizationType, UserRole } from '../generated/prisma/enums';
@@ -49,6 +49,7 @@ export class AcademicRecordsController {
       graduationDate: dto.graduationDate
         ? new Date(dto.graduationDate)
         : undefined,
+      actorId: request.user.sub,
     });
   }
 
@@ -70,20 +71,6 @@ export class AcademicRecordsController {
     }
 
     return record;
-  }
-
-  private async getUniversityId(userId: string): Promise<string> {
-    const membership =
-      await this.organizationsService.findMembershipForUser(userId);
-
-    if (
-      !membership ||
-      membership.organization.type !== OrganizationType.UNIVERSITY
-    ) {
-      throw new NotFoundException('University membership not found');
-    }
-
-    return membership.organization.id;
   }
 
   @Patch(':id')
@@ -112,5 +99,19 @@ export class AcademicRecordsController {
         : undefined,
       status: dto.status,
     });
+  }
+
+  private async getUniversityId(userId: string): Promise<string> {
+    const membership =
+      await this.organizationsService.findMembershipForUser(userId);
+
+    if (
+      !membership ||
+      membership.organization.type !== OrganizationType.UNIVERSITY
+    ) {
+      throw new NotFoundException('University membership not found');
+    }
+
+    return membership.organization.id;
   }
 }

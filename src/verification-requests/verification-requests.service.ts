@@ -7,9 +7,9 @@ import {
 } from '@nestjs/common';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 
-import type { Prisma } from '../generated/prisma/client';
 import { EncryptionService } from '../crypto/encryption.service';
 import { DidService } from '../did/did.service';
+import type { Prisma } from '../generated/prisma/client';
 import {
   EducationVerificationStatus,
   VerificationRequestStatus,
@@ -73,26 +73,18 @@ export class VerificationRequestsService {
       application.job.requiredClaims,
     );
 
+    const requestId = randomUUID();
+
     const nonce = randomBytes(32).toString('hex');
 
     const nonceHash = createHash('sha256').update(nonce).digest('hex');
 
     const expiresAt = new Date(Date.now() + this.ttlSeconds * 1000);
 
-    const request = await this.prisma.verificationRequest.create({
-      data: {
-        applicationId: input.applicationId,
-        verifierId: input.verifierId,
-        holderId: application.holderId,
-        requestedClaims: input.requestedClaims,
-        nonceHash,
-        status: VerificationRequestStatus.PENDING,
-        expiresAt,
-      },
-    });
+    const redisKey = `verification-request:${requestId}`;
 
     await this.redis.setJson(
-      `verification-request:${request.id}`,
+      redisKey,
       {
         applicationId: input.applicationId,
         holderId: application.holderId,
@@ -103,22 +95,60 @@ export class VerificationRequestsService {
       this.ttlSeconds,
     );
 
-    await this.prisma.application.update({
-      where: {
-        id: input.applicationId,
-      },
-      data: {
-        educationVerificationStatus: EducationVerificationStatus.PENDING,
-      },
-    });
+    try {
+      const request = await this.prisma.$transaction(async (transaction) => {
+        const createdRequest = await transaction.verificationRequest.create({
+          data: {
+            id: requestId,
+            applicationId: input.applicationId,
+            verifierId: input.verifierId,
+            holderId: application.holderId,
+            requestedClaims: input.requestedClaims,
+            nonceHash,
+            status: VerificationRequestStatus.PENDING,
+            expiresAt,
+          },
+        });
 
-    return {
-      requestId: request.id,
-      nonce,
-      expiresAt: request.expiresAt,
-      status: request.status,
-      requestedClaims: request.requestedClaims,
-    };
+        await transaction.application.update({
+          where: {
+            id: input.applicationId,
+          },
+          data: {
+            educationVerificationStatus: EducationVerificationStatus.PENDING,
+          },
+        });
+
+        await transaction.auditLog.create({
+          data: {
+            actorId: input.verifierId,
+            organizationId: input.bankId,
+            action: 'CREDENTIAL_REQUEST_CREATED',
+            resourceType: 'VerificationRequest',
+            resourceId: createdRequest.id,
+            metadata: {
+              applicationId: input.applicationId,
+              holderId: application.holderId,
+              requestedClaims: input.requestedClaims,
+            },
+          },
+        });
+
+        return createdRequest;
+      });
+
+      return {
+        requestId: request.id,
+        nonce,
+        expiresAt: request.expiresAt,
+        status: request.status,
+        requestedClaims: request.requestedClaims,
+      };
+    } catch (error) {
+      await this.redis.delete(redisKey);
+
+      throw error;
+    }
   }
 
   async findOne(id: string) {
@@ -243,27 +273,62 @@ export class VerificationRequestsService {
       signature: holderSignature.signature,
     };
 
-    const presentation = await this.prisma.presentation.create({
-      data: {
-        id: presentationId,
-        requestId: request.id,
-        credentialId: input.credentialId,
-        holderId: input.holderId,
-        holderDid: holderSignature.did,
-        disclosedClaims,
-        nonce: session.nonce,
-        presentationHash,
-        holderProof,
-      },
-    });
+    const presentation = await this.prisma.$transaction(async (transaction) => {
+      const createdPresentation = await transaction.presentation.create({
+        data: {
+          id: presentationId,
+          requestId: request.id,
+          credentialId: input.credentialId,
+          holderId: input.holderId,
+          holderDid: holderSignature.did,
+          disclosedClaims,
+          nonce: session.nonce,
+          presentationHash,
+          holderProof,
+        },
+      });
 
-    await this.prisma.verificationRequest.update({
-      where: {
-        id: request.id,
-      },
-      data: {
-        status: VerificationRequestStatus.APPROVED,
-      },
+      await transaction.verificationRequest.update({
+        where: {
+          id: request.id,
+        },
+        data: {
+          status: VerificationRequestStatus.APPROVED,
+        },
+      });
+
+      await transaction.auditLog.create({
+        data: {
+          actorId: input.holderId,
+          organizationId: session.bankId,
+          action: 'CREDENTIAL_REQUEST_APPROVED',
+          resourceType: 'VerificationRequest',
+          resourceId: request.id,
+          metadata: {
+            applicationId: request.applicationId,
+            credentialId: input.credentialId,
+            approvedClaims,
+          },
+        },
+      });
+
+      await transaction.auditLog.create({
+        data: {
+          actorId: input.holderId,
+          organizationId: session.bankId,
+          action: 'PRESENTATION_CREATED',
+          resourceType: 'Presentation',
+          resourceId: createdPresentation.id,
+          metadata: {
+            requestId: request.id,
+            applicationId: request.applicationId,
+            credentialId: input.credentialId,
+            disclosedClaimNames: approvedClaims,
+          },
+        },
+      });
+
+      return createdPresentation;
     });
 
     return {
@@ -307,13 +372,30 @@ export class VerificationRequestsService {
       throw new BadRequestException('Verification request has expired');
     }
 
-    const updated = await this.prisma.verificationRequest.update({
-      where: {
-        id: request.id,
-      },
-      data: {
-        status: VerificationRequestStatus.REJECTED,
-      },
+    const updated = await this.prisma.$transaction(async (transaction) => {
+      const updatedRequest = await transaction.verificationRequest.update({
+        where: {
+          id: request.id,
+        },
+        data: {
+          status: VerificationRequestStatus.REJECTED,
+        },
+      });
+
+      await transaction.auditLog.create({
+        data: {
+          actorId: holderId,
+          organizationId: session.bankId,
+          action: 'CREDENTIAL_REQUEST_REJECTED',
+          resourceType: 'VerificationRequest',
+          resourceId: request.id,
+          metadata: {
+            applicationId: request.applicationId,
+          },
+        },
+      });
+
+      return updatedRequest;
     });
 
     await this.redis.delete(`verification-request:${request.id}`);

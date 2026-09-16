@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+
 import { AcademicRecordStatus } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -13,6 +14,7 @@ interface CreateAcademicRecordInput {
   cgpa?: number;
   graduationYear: number;
   graduationDate?: Date;
+  actorId: string;
 }
 
 interface UpdateAcademicRecordInput {
@@ -31,14 +33,36 @@ export class AcademicRecordsService {
   constructor(private readonly prisma: PrismaService) {}
 
   async create(input: CreateAcademicRecordInput) {
-    return this.prisma.academicRecord.create({
-      data: input,
+    const { actorId, ...recordData } = input;
+
+    return this.prisma.$transaction(async (transaction) => {
+      const record = await transaction.academicRecord.create({
+        data: recordData,
+      });
+
+      await transaction.auditLog.create({
+        data: {
+          actorId,
+          organizationId: input.universityId,
+          action: 'ACADEMIC_RECORD_CREATED',
+          resourceType: 'AcademicRecord',
+          resourceId: record.id,
+          metadata: {
+            holderId: input.holderId,
+            studentId: input.studentId,
+          },
+        },
+      });
+
+      return record;
     });
   }
 
   async findById(id: string) {
     const record = await this.prisma.academicRecord.findUnique({
-      where: { id },
+      where: {
+        id,
+      },
     });
 
     if (!record) {
@@ -63,7 +87,9 @@ export class AcademicRecordsService {
     await this.findById(id);
 
     return this.prisma.academicRecord.update({
-      where: { id },
+      where: {
+        id,
+      },
       data: input,
     });
   }

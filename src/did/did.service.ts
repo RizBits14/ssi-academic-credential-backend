@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
+
 import { EncryptionService } from '../crypto/encryption.service';
 import { SignatureService } from '../crypto/signature.service';
 import {
@@ -94,11 +95,13 @@ export class DidService {
     return {
       id: record.did,
       controller: record.ownerId,
+
       verificationMethod: {
         id: `${record.did}#key-${record.keyVersion}`,
         type: 'Ed25519VerificationKey',
         publicKey: record.publicKey,
       },
+
       status: record.status,
     };
   }
@@ -132,35 +135,6 @@ export class DidService {
     };
   }
 
-  private async createDid(
-    ownerType: DidOwnerType,
-    ownerId: string,
-    prefix: string,
-  ) {
-    const keyPair = this.signatureService.generateKeyPair();
-
-    const encryptedPrivateKey = this.encryptionService.encrypt(
-      keyPair.privateKey,
-    );
-
-    const did = `did:mock:${prefix}:${randomUUID()}`;
-
-    return this.prisma.did.create({
-      data: {
-        did,
-        ownerType,
-        ownerId,
-        publicKey: keyPair.publicKey,
-        encryptedPrivateKey: encryptedPrivateKey.ciphertext,
-        iv: encryptedPrivateKey.iv,
-        authTag: encryptedPrivateKey.authTag,
-        algorithm: 'Ed25519',
-        keyVersion: 1,
-        status: DidStatus.ACTIVE,
-      },
-    });
-  }
-
   async signForUser(userId: string, data: string) {
     const didRecord = await this.findByOwner(DidOwnerType.USER, userId);
 
@@ -185,5 +159,64 @@ export class DidService {
       keyVersion: didRecord.keyVersion,
       signature,
     };
+  }
+
+  private async createDid(
+    ownerType: DidOwnerType,
+    ownerId: string,
+    prefix: string,
+  ) {
+    const keyPair = this.signatureService.generateKeyPair();
+
+    const encryptedPrivateKey = this.encryptionService.encrypt(
+      keyPair.privateKey,
+    );
+
+    const did = `did:mock:${prefix}:${randomUUID()}`;
+
+    return this.prisma.$transaction(async (transaction) => {
+      const didRecord = await transaction.did.create({
+        data: {
+          did,
+          ownerType,
+          ownerId,
+          publicKey: keyPair.publicKey,
+          encryptedPrivateKey: encryptedPrivateKey.ciphertext,
+          iv: encryptedPrivateKey.iv,
+          authTag: encryptedPrivateKey.authTag,
+          algorithm: 'Ed25519',
+          keyVersion: 1,
+          status: DidStatus.ACTIVE,
+        },
+      });
+
+      await transaction.auditLog.create({
+        data: {
+          ...(ownerType === DidOwnerType.USER
+            ? {
+                actorId: ownerId,
+              }
+            : {}),
+
+          ...(ownerType === DidOwnerType.ORGANIZATION
+            ? {
+                organizationId: ownerId,
+              }
+            : {}),
+
+          action: 'DID_CREATED',
+          resourceType: 'DID',
+          resourceId: didRecord.id,
+
+          metadata: {
+            did,
+            ownerType,
+            ownerId,
+          },
+        },
+      });
+
+      return didRecord;
+    });
   }
 }

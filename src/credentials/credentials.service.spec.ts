@@ -1,7 +1,5 @@
 import { describe, expect, it, jest } from '@jest/globals';
-import { EncryptionService } from '../crypto/encryption.service';
 import { HashingService } from '../crypto/hashing.service';
-import { DidService } from '../did/did.service';
 import { CredentialsService } from './credentials.service';
 
 describe('CredentialsService', () => {
@@ -23,8 +21,8 @@ describe('CredentialsService', () => {
 
   const service = new CredentialsService(
     hashingService,
-    mockDidService as unknown as DidService,
-    mockEncryptionService as unknown as EncryptionService,
+    mockDidService,
+    mockEncryptionService,
   );
 
   it('should build an unsigned academic credential', () => {

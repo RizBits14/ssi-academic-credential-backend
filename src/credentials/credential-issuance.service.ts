@@ -24,6 +24,10 @@ interface PrepareCredentialIssuanceInput {
   expiresAt?: Date;
 }
 
+interface IssueCredentialInput extends PrepareCredentialIssuanceInput {
+  actorId: string;
+}
+
 @Injectable()
 export class CredentialIssuanceService {
   constructor(
@@ -157,7 +161,7 @@ export class CredentialIssuanceService {
     };
   }
 
-  async issue(input: PrepareCredentialIssuanceInput) {
+  async issue(input: IssueCredentialInput) {
     const prepared = await this.prepare(input);
 
     return this.prisma.$transaction(async (transaction) => {
@@ -184,6 +188,32 @@ export class CredentialIssuanceService {
           ciphertext: prepared.encryptedWalletCredential.ciphertext,
           iv: prepared.encryptedWalletCredential.iv,
           authTag: prepared.encryptedWalletCredential.authTag,
+        },
+      });
+
+      await transaction.credentialStatusHistory.create({
+        data: {
+          credentialId: credential.id,
+          previousStatus: null,
+          newStatus: CredentialStatus.ACTIVE,
+          changedBy: input.actorId,
+          reason: 'Credential issued',
+        },
+      });
+
+      await transaction.auditLog.create({
+        data: {
+          actorId: input.actorId,
+          organizationId: prepared.issuerOrganizationId,
+          action: 'CREDENTIAL_ISSUED',
+          resourceType: 'Credential',
+          resourceId: credential.id,
+          metadata: {
+            vcId: prepared.vcId,
+            holderId: prepared.holderId,
+            academicRecordId: prepared.academicRecordId,
+            schemaId: prepared.schemaId,
+          },
         },
       });
 

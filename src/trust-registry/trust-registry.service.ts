@@ -70,24 +70,41 @@ export class TrustRegistryService {
       throw new ConflictException('Issuer DID is already registered');
     }
 
-    return this.prisma.trustedIssuer.create({
-      data: {
-        organizationId: organization.id,
-        issuerDid: input.issuerDid,
-        approvedBy: input.approvedBy,
-        status: TrustedIssuerStatus.TRUSTED,
-      },
-      include: {
-        organization: true,
-        approvedByUser: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-            role: true,
+    return this.prisma.$transaction(async (transaction) => {
+      const trustedIssuer = await transaction.trustedIssuer.create({
+        data: {
+          organizationId: organization.id,
+          issuerDid: input.issuerDid,
+          approvedBy: input.approvedBy,
+          status: TrustedIssuerStatus.TRUSTED,
+        },
+        include: {
+          organization: true,
+          approvedByUser: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              role: true,
+            },
           },
         },
-      },
+      });
+
+      await transaction.auditLog.create({
+        data: {
+          actorId: input.approvedBy,
+          organizationId: organization.id,
+          action: 'TRUSTED_ISSUER_ADDED',
+          resourceType: 'TrustedIssuer',
+          resourceId: trustedIssuer.id,
+          metadata: {
+            issuerDid: input.issuerDid,
+          },
+        },
+      });
+
+      return trustedIssuer;
     });
   }
 
@@ -137,7 +154,7 @@ export class TrustRegistryService {
     return trustedIssuer?.status === TrustedIssuerStatus.TRUSTED;
   }
 
-  async suspend(id: string) {
+  async suspend(id: string, actorId: string) {
     const trustedIssuer = await this.prisma.trustedIssuer.findUnique({
       where: {
         id,
@@ -152,14 +169,31 @@ export class TrustRegistryService {
       throw new ConflictException('Only a trusted issuer can be suspended');
     }
 
-    return this.prisma.trustedIssuer.update({
-      where: {
-        id,
-      },
-      data: {
-        status: TrustedIssuerStatus.SUSPENDED,
-        suspendedAt: new Date(),
-      },
+    return this.prisma.$transaction(async (transaction) => {
+      const updated = await transaction.trustedIssuer.update({
+        where: {
+          id,
+        },
+        data: {
+          status: TrustedIssuerStatus.SUSPENDED,
+          suspendedAt: new Date(),
+        },
+      });
+
+      await transaction.auditLog.create({
+        data: {
+          actorId,
+          organizationId: trustedIssuer.organizationId,
+          action: 'TRUSTED_ISSUER_SUSPENDED',
+          resourceType: 'TrustedIssuer',
+          resourceId: trustedIssuer.id,
+          metadata: {
+            issuerDid: trustedIssuer.issuerDid,
+          },
+        },
+      });
+
+      return updated;
     });
   }
 }

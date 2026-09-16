@@ -47,7 +47,10 @@ export class TrustRegistryController {
   }
 
   @Patch(':id/suspend')
-  async suspend(@Param('id', ParseUUIDPipe) id: string) {
-    return this.trustRegistryService.suspend(id);
+  async suspend(
+    @Req() request: AuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.trustRegistryService.suspend(id, request.user.sub);
   }
 }

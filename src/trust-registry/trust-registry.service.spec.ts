@@ -1,4 +1,4 @@
-import { describe, expect, it, jest } from '@jest/globals';
+import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 import { DidService } from '../did/did.service';
 import {
@@ -12,13 +12,30 @@ import { PrismaService } from '../prisma/prisma.service';
 import { TrustRegistryService } from './trust-registry.service';
 
 describe('TrustRegistryService', () => {
+  const transactionClient = {
+    trustedIssuer: {
+      create: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+
+      update: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+    },
+
+    auditLog: {
+      create: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+    },
+  };
+
   const mockPrismaService = {
     trustedIssuer: {
       findUnique: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+
       findMany: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
-      create: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
-      update: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
     },
+
+    $transaction: jest.fn(
+      async (
+        callback: (transaction: typeof transactionClient) => Promise<unknown>,
+      ) => callback(transactionClient),
+    ),
   };
 
   const mockOrganizationsService = {
@@ -29,13 +46,19 @@ describe('TrustRegistryService', () => {
     findByDid: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
   };
 
-  const service = new TrustRegistryService(
-    mockPrismaService as unknown as PrismaService,
-    mockOrganizationsService as unknown as OrganizationsService,
-    mockDidService as unknown as DidService,
-  );
+  let service: TrustRegistryService;
 
-  it('should register a university issuer as trusted', async () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+
+    service = new TrustRegistryService(
+      mockPrismaService as unknown as PrismaService,
+      mockOrganizationsService as unknown as OrganizationsService,
+      mockDidService as unknown as DidService,
+    );
+  });
+
+  it('should register a university issuer and create audit log', async () => {
     mockOrganizationsService.findById.mockResolvedValue({
       id: 'university-id',
       type: OrganizationType.UNIVERSITY,
@@ -50,12 +73,16 @@ describe('TrustRegistryService', () => {
 
     mockPrismaService.trustedIssuer.findUnique.mockResolvedValue(null);
 
-    mockPrismaService.trustedIssuer.create.mockResolvedValue({
+    transactionClient.trustedIssuer.create.mockResolvedValue({
       id: 'trusted-issuer-id',
       organizationId: 'university-id',
       issuerDid: 'did:mock:university:123',
       approvedBy: 'admin-id',
       status: TrustedIssuerStatus.TRUSTED,
+    });
+
+    transactionClient.auditLog.create.mockResolvedValue({
+      id: 'audit-id',
     });
 
     const result = await service.create({
@@ -64,15 +91,17 @@ describe('TrustRegistryService', () => {
       approvedBy: 'admin-id',
     });
 
-    expect(mockPrismaService.trustedIssuer.create).toHaveBeenCalledWith({
+    expect(transactionClient.trustedIssuer.create).toHaveBeenCalledWith({
       data: {
         organizationId: 'university-id',
         issuerDid: 'did:mock:university:123',
         approvedBy: 'admin-id',
         status: TrustedIssuerStatus.TRUSTED,
       },
+
       include: {
         organization: true,
+
         approvedByUser: {
           select: {
             id: true,
@@ -80,6 +109,20 @@ describe('TrustRegistryService', () => {
             email: true,
             role: true,
           },
+        },
+      },
+    });
+
+    expect(transactionClient.auditLog.create).toHaveBeenCalledWith({
+      data: {
+        actorId: 'admin-id',
+        organizationId: 'university-id',
+        action: 'TRUSTED_ISSUER_ADDED',
+        resourceType: 'TrustedIssuer',
+        resourceId: 'trusted-issuer-id',
+
+        metadata: {
+          issuerDid: 'did:mock:university:123',
         },
       },
     });
@@ -132,29 +175,49 @@ describe('TrustRegistryService', () => {
     ).rejects.toThrow('Issuer DID does not belong to the organization');
   });
 
-  it('should suspend a trusted issuer', async () => {
+  it('should suspend a trusted issuer and create audit log', async () => {
     mockPrismaService.trustedIssuer.findUnique.mockResolvedValue({
       id: 'trusted-issuer-id',
+      organizationId: 'university-id',
       issuerDid: 'did:mock:university:123',
       status: TrustedIssuerStatus.TRUSTED,
     });
 
-    mockPrismaService.trustedIssuer.update.mockResolvedValue({
+    transactionClient.trustedIssuer.update.mockResolvedValue({
       id: 'trusted-issuer-id',
       issuerDid: 'did:mock:university:123',
       status: TrustedIssuerStatus.SUSPENDED,
       suspendedAt: new Date(),
     });
 
-    const result = await service.suspend('trusted-issuer-id');
+    transactionClient.auditLog.create.mockResolvedValue({
+      id: 'audit-id',
+    });
 
-    expect(mockPrismaService.trustedIssuer.update).toHaveBeenCalledWith({
+    const result = await service.suspend('trusted-issuer-id', 'admin-id');
+
+    expect(transactionClient.trustedIssuer.update).toHaveBeenCalledWith({
       where: {
         id: 'trusted-issuer-id',
       },
+
       data: {
         status: TrustedIssuerStatus.SUSPENDED,
         suspendedAt: expect.any(Date),
+      },
+    });
+
+    expect(transactionClient.auditLog.create).toHaveBeenCalledWith({
+      data: {
+        actorId: 'admin-id',
+        organizationId: 'university-id',
+        action: 'TRUSTED_ISSUER_SUSPENDED',
+        resourceType: 'TrustedIssuer',
+        resourceId: 'trusted-issuer-id',
+
+        metadata: {
+          issuerDid: 'did:mock:university:123',
+        },
       },
     });
 
@@ -171,8 +234,8 @@ describe('TrustRegistryService', () => {
       status: TrustedIssuerStatus.SUSPENDED,
     });
 
-    await expect(service.suspend('trusted-issuer-id')).rejects.toThrow(
-      'Only a trusted issuer can be suspended',
-    );
+    await expect(
+      service.suspend('trusted-issuer-id', 'admin-id'),
+    ).rejects.toThrow('Only a trusted issuer can be suspended');
   });
 });

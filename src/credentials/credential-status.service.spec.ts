@@ -1,4 +1,4 @@
-import { describe, expect, it, jest } from '@jest/globals';
+import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 import { CredentialStatus } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
@@ -10,6 +10,9 @@ describe('CredentialStatusService', () => {
       update: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
     },
     credentialStatusHistory: {
+      create: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+    },
+    auditLog: {
       create: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
     },
   };
@@ -29,11 +32,17 @@ describe('CredentialStatusService', () => {
     ),
   };
 
-  const service = new CredentialStatusService(
-    mockPrismaService as unknown as PrismaService,
-  );
+  let service: CredentialStatusService;
 
-  it('should suspend an active credential and create history', async () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+
+    service = new CredentialStatusService(
+      mockPrismaService as unknown as PrismaService,
+    );
+  });
+
+  it('should suspend an active credential with history and audit log', async () => {
     mockPrismaService.credential.findFirst.mockResolvedValue({
       id: 'credential-id',
       issuerOrganizationId: 'university-id',
@@ -47,6 +56,10 @@ describe('CredentialStatusService', () => {
 
     transactionClient.credentialStatusHistory.create.mockResolvedValue({
       id: 'history-id',
+    });
+
+    transactionClient.auditLog.create.mockResolvedValue({
+      id: 'audit-id',
     });
 
     const result = await service.suspend({
@@ -77,6 +90,21 @@ describe('CredentialStatusService', () => {
       },
     });
 
+    expect(transactionClient.auditLog.create).toHaveBeenCalledWith({
+      data: {
+        actorId: 'issuer-admin-id',
+        organizationId: 'university-id',
+        action: 'CREDENTIAL_SUSPENDED',
+        resourceType: 'Credential',
+        resourceId: 'credential-id',
+        metadata: {
+          previousStatus: CredentialStatus.ACTIVE,
+          newStatus: CredentialStatus.SUSPENDED,
+          reason: 'Under investigation',
+        },
+      },
+    });
+
     expect(result).toEqual(
       expect.objectContaining({
         status: CredentialStatus.SUSPENDED,
@@ -84,7 +112,7 @@ describe('CredentialStatusService', () => {
     );
   });
 
-  it('should revoke an active credential', async () => {
+  it('should revoke a credential with history and audit log', async () => {
     mockPrismaService.credential.findFirst.mockResolvedValue({
       id: 'credential-id',
       issuerOrganizationId: 'university-id',
@@ -100,11 +128,30 @@ describe('CredentialStatusService', () => {
       id: 'history-id',
     });
 
+    transactionClient.auditLog.create.mockResolvedValue({
+      id: 'audit-id',
+    });
+
     const result = await service.revoke({
       credentialId: 'credential-id',
       issuerOrganizationId: 'university-id',
       changedBy: 'issuer-admin-id',
       reason: 'Incorrect academic record',
+    });
+
+    expect(transactionClient.auditLog.create).toHaveBeenCalledWith({
+      data: {
+        actorId: 'issuer-admin-id',
+        organizationId: 'university-id',
+        action: 'CREDENTIAL_REVOKED',
+        resourceType: 'Credential',
+        resourceId: 'credential-id',
+        metadata: {
+          previousStatus: CredentialStatus.ACTIVE,
+          newStatus: CredentialStatus.REVOKED,
+          reason: 'Incorrect academic record',
+        },
+      },
     });
 
     expect(result).toEqual(
@@ -130,10 +177,28 @@ describe('CredentialStatusService', () => {
       id: 'history-id',
     });
 
+    transactionClient.auditLog.create.mockResolvedValue({
+      id: 'audit-id',
+    });
+
     const result = await service.reactivate({
       credentialId: 'credential-id',
       issuerOrganizationId: 'university-id',
       changedBy: 'issuer-admin-id',
+    });
+
+    expect(transactionClient.auditLog.create).toHaveBeenCalledWith({
+      data: {
+        actorId: 'issuer-admin-id',
+        organizationId: 'university-id',
+        action: 'CREDENTIAL_REACTIVATED',
+        resourceType: 'Credential',
+        resourceId: 'credential-id',
+        metadata: {
+          previousStatus: CredentialStatus.SUSPENDED,
+          newStatus: CredentialStatus.ACTIVE,
+        },
+      },
     });
 
     expect(result).toEqual(
@@ -157,5 +222,21 @@ describe('CredentialStatusService', () => {
         changedBy: 'issuer-admin-id',
       }),
     ).rejects.toThrow('Only a suspended credential can be reactivated');
+  });
+
+  it('should reject revoking an expired credential', async () => {
+    mockPrismaService.credential.findFirst.mockResolvedValue({
+      id: 'credential-id',
+      issuerOrganizationId: 'university-id',
+      status: CredentialStatus.EXPIRED,
+    });
+
+    await expect(
+      service.revoke({
+        credentialId: 'credential-id',
+        issuerOrganizationId: 'university-id',
+        changedBy: 'issuer-admin-id',
+      }),
+    ).rejects.toThrow('An expired credential cannot be revoked');
   });
 });

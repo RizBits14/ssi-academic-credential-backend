@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
+
 import { EncryptionService } from '../crypto/encryption.service';
 import { HashingService } from '../crypto/hashing.service';
 import { DidService } from '../did/did.service';
@@ -34,25 +35,41 @@ export class CredentialsService {
   buildUnsignedAcademicCredential(input: BuildAcademicCredentialInput) {
     return {
       '@context': ['https://www.w3.org/ns/credentials/v2'],
+
       id: `urn:uuid:${randomUUID()}`,
+
       type: ['VerifiableCredential', input.schemaName],
+
       issuer: {
         id: input.issuerDid,
         name: input.issuerName,
       },
+
       validFrom: input.issuedAt.toISOString(),
+
       credentialSubject: {
         id: input.holderDid,
         fullName: input.fullName,
         studentId: input.studentId,
         degree: input.degree,
+
         ...(input.department !== undefined
-          ? { department: input.department }
+          ? {
+              department: input.department,
+            }
           : {}),
+
         major: input.major,
-        ...(input.cgpa !== undefined ? { cgpa: input.cgpa } : {}),
+
+        ...(input.cgpa !== undefined
+          ? {
+              cgpa: input.cgpa,
+            }
+          : {}),
+
         graduationYear: input.graduationYear,
       },
+
       metadata: {
         schema: input.schemaName,
         schemaVersion: input.schemaVersion,
@@ -74,10 +91,14 @@ export class CredentialsService {
 
     return {
       ...unsignedCredential,
+
       proof: {
         type: 'Ed25519Signature',
         created: createdAt.toISOString(),
-        verificationMethod: `${signingResult.did}#key-${signingResult.keyVersion}`,
+
+        verificationMethod:
+          `${signingResult.did}` + `#key-${signingResult.keyVersion}`,
+
         proofValue: signingResult.signature,
       },
     };

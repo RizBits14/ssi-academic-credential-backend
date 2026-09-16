@@ -12,7 +12,6 @@ import {
 import { OrganizationsService } from '../organizations/organizations.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CredentialIssuanceService } from './credential-issuance.service';
-import { CredentialsService } from './credentials.service';
 
 describe('CredentialIssuanceService', () => {
   const mockAcademicRecordsService = {
@@ -35,9 +34,12 @@ describe('CredentialIssuanceService', () => {
   const mockCredentialsService = {
     buildUnsignedAcademicCredential:
       jest.fn<(...args: unknown[]) => Record<string, unknown>>(),
+
     hashCredential: jest.fn<(...args: unknown[]) => string>(),
+
     addIssuerProof:
       jest.fn<(...args: unknown[]) => Promise<Record<string, unknown>>>(),
+
     encryptCredentialForWallet: jest.fn<
       (...args: unknown[]) => {
         ciphertext: string;
@@ -51,7 +53,16 @@ describe('CredentialIssuanceService', () => {
     credential: {
       create: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
     },
+
     walletCredential: {
+      create: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+    },
+
+    credentialStatusHistory: {
+      create: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+    },
+
+    auditLog: {
       create: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
     },
   };
@@ -71,7 +82,7 @@ describe('CredentialIssuanceService', () => {
     mockCredentialSchemasService as unknown as CredentialSchemasService,
     mockOrganizationsService as unknown as OrganizationsService,
     mockDidService as unknown as DidService,
-    mockCredentialsService as unknown as CredentialsService,
+    mockCredentialsService,
     mockPrismaService as unknown as PrismaService,
   );
 
@@ -186,7 +197,7 @@ describe('CredentialIssuanceService', () => {
     );
   });
 
-  it('should persist credential and wallet credential in one transaction', async () => {
+  it('should persist issuance records and audit log in one transaction', async () => {
     const preparedCredential = {
       vcId: 'urn:uuid:credential-123',
       issuerOrganizationId: 'university-id',
@@ -198,6 +209,7 @@ describe('CredentialIssuanceService', () => {
       credentialHash: 'credential-hash',
       issuedAt: new Date('2026-09-15T00:00:00.000Z'),
       expiresAt: undefined,
+
       signedCredential: {
         id: 'urn:uuid:credential-123',
         proof: {
@@ -207,6 +219,7 @@ describe('CredentialIssuanceService', () => {
           proofValue: 'signature',
         },
       },
+
       encryptedWalletCredential: {
         ciphertext: 'encrypted',
         iv: 'iv',
@@ -227,10 +240,19 @@ describe('CredentialIssuanceService', () => {
       credentialId: 'credential-db-id',
     });
 
+    mockTransactionClient.credentialStatusHistory.create.mockResolvedValue({
+      id: 'history-id',
+    });
+
+    mockTransactionClient.auditLog.create.mockResolvedValue({
+      id: 'audit-id',
+    });
+
     const result = await service.issue({
       issuerOrganizationId: 'university-id',
       academicRecordId: 'record-id',
       schemaId: 'schema-id',
+      actorId: 'issuer-admin-id',
     });
 
     expect(mockPrismaService.$transaction).toHaveBeenCalled();
@@ -258,6 +280,34 @@ describe('CredentialIssuanceService', () => {
         ciphertext: 'encrypted',
         iv: 'iv',
         authTag: 'auth-tag',
+      },
+    });
+
+    expect(
+      mockTransactionClient.credentialStatusHistory.create,
+    ).toHaveBeenCalledWith({
+      data: {
+        credentialId: 'credential-db-id',
+        previousStatus: null,
+        newStatus: CredentialStatus.ACTIVE,
+        changedBy: 'issuer-admin-id',
+        reason: 'Credential issued',
+      },
+    });
+
+    expect(mockTransactionClient.auditLog.create).toHaveBeenCalledWith({
+      data: {
+        actorId: 'issuer-admin-id',
+        organizationId: 'university-id',
+        action: 'CREDENTIAL_ISSUED',
+        resourceType: 'Credential',
+        resourceId: 'credential-db-id',
+        metadata: {
+          vcId: preparedCredential.vcId,
+          holderId: preparedCredential.holderId,
+          academicRecordId: preparedCredential.academicRecordId,
+          schemaId: preparedCredential.schemaId,
+        },
       },
     });
 

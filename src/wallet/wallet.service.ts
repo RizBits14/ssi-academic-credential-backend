@@ -1,8 +1,8 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 
 import { EncryptionService } from '../crypto/encryption.service';
-import { PrismaService } from '../prisma/prisma.service';
 import { VerificationRequestStatus } from '../generated/prisma/enums';
+import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class WalletService {
@@ -68,7 +68,22 @@ export class WalletService {
       authTag: walletCredential.authTag,
     });
 
-    return JSON.parse(plaintext) as Record<string, unknown>;
+    const credential = JSON.parse(plaintext) as Record<string, unknown>;
+
+    await this.prisma.auditLog.create({
+      data: {
+        actorId: holderId,
+        organizationId: walletCredential.credential.issuerOrganizationId,
+        action: 'CREDENTIAL_VIEWED',
+        resourceType: 'Credential',
+        resourceId: walletCredential.credential.id,
+        metadata: {
+          walletCredentialId: walletCredential.id,
+        },
+      },
+    });
+
+    return credential;
   }
 
   async findPendingRequests(holderId: string) {

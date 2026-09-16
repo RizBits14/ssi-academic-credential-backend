@@ -1,4 +1,4 @@
-import { describe, expect, it, jest } from '@jest/globals';
+import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 import { EncryptionService } from '../crypto/encryption.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -8,11 +8,18 @@ describe('WalletService', () => {
   const mockPrismaService = {
     walletCredential: {
       findMany: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+
       findFirst: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
     },
+
     verificationRequest: {
       updateMany: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+
       findMany: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+    },
+
+    auditLog: {
+      create: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
     },
   };
 
@@ -20,10 +27,16 @@ describe('WalletService', () => {
     decrypt: jest.fn<(...args: unknown[]) => string>(),
   };
 
-  const service = new WalletService(
-    mockPrismaService as unknown as PrismaService,
-    mockEncryptionService as unknown as EncryptionService,
-  );
+  let service: WalletService;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+
+    service = new WalletService(
+      mockPrismaService as unknown as PrismaService,
+      mockEncryptionService as unknown as EncryptionService,
+    );
+  });
 
   it('should list wallet credentials belonging to a holder', async () => {
     mockPrismaService.walletCredential.findMany.mockResolvedValue([
@@ -56,7 +69,7 @@ describe('WalletService', () => {
     expect(result).toHaveLength(1);
   });
 
-  it('should decrypt a wallet credential belonging to the holder', async () => {
+  it('should decrypt and audit a credential view', async () => {
     mockPrismaService.walletCredential.findFirst.mockResolvedValue({
       id: 'wallet-credential-id',
       holderId: 'holder-id',
@@ -64,39 +77,38 @@ describe('WalletService', () => {
       ciphertext: 'encrypted-data',
       iv: 'test-iv',
       authTag: 'test-auth-tag',
+
       credential: {
         id: 'credential-id',
+        issuerOrganizationId: 'university-id',
+        issuerOrganization: {
+          id: 'university-id',
+          name: 'Example University',
+        },
+        schema: {
+          id: 'schema-id',
+        },
       },
     });
 
     mockEncryptionService.decrypt.mockReturnValue(
       JSON.stringify({
         id: 'urn:uuid:test',
+
         credentialSubject: {
           studentId: '20260001',
         },
       }),
     );
 
+    mockPrismaService.auditLog.create.mockResolvedValue({
+      id: 'audit-id',
+    });
+
     const result = await service.decryptCredentialForHolder(
       'holder-id',
       'wallet-credential-id',
     );
-
-    expect(mockPrismaService.walletCredential.findFirst).toHaveBeenCalledWith({
-      where: {
-        id: 'wallet-credential-id',
-        holderId: 'holder-id',
-      },
-      include: {
-        credential: {
-          include: {
-            issuerOrganization: true,
-            schema: true,
-          },
-        },
-      },
-    });
 
     expect(mockEncryptionService.decrypt).toHaveBeenCalledWith({
       ciphertext: 'encrypted-data',
@@ -104,8 +116,23 @@ describe('WalletService', () => {
       authTag: 'test-auth-tag',
     });
 
+    expect(mockPrismaService.auditLog.create).toHaveBeenCalledWith({
+      data: {
+        actorId: 'holder-id',
+        organizationId: 'university-id',
+        action: 'CREDENTIAL_VIEWED',
+        resourceType: 'Credential',
+        resourceId: 'credential-id',
+
+        metadata: {
+          walletCredentialId: 'wallet-credential-id',
+        },
+      },
+    });
+
     expect(result).toEqual({
       id: 'urn:uuid:test',
+
       credentialSubject: {
         studentId: '20260001',
       },
@@ -132,9 +159,11 @@ describe('WalletService', () => {
         id: 'request-id',
         requestedClaims: ['degree', 'major'],
         expiresAt,
+
         application: {
           job: {
             title: 'Graduate Engineer',
+
             bank: {
               name: 'Example Bank',
             },

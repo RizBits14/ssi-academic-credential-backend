@@ -28,13 +28,15 @@ export class CredentialStatusService {
       throw new ConflictException('Only an active credential can be suspended');
     }
 
-    return this.changeStatus(
-      credential.id,
-      credential.status,
-      CredentialStatus.SUSPENDED,
-      input.changedBy,
-      input.reason,
-    );
+    return this.changeStatus({
+      credentialId: credential.id,
+      issuerOrganizationId: input.issuerOrganizationId,
+      previousStatus: credential.status,
+      newStatus: CredentialStatus.SUSPENDED,
+      changedBy: input.changedBy,
+      reason: input.reason,
+      auditAction: 'CREDENTIAL_SUSPENDED',
+    });
   }
 
   async revoke(input: ChangeCredentialStatusInput) {
@@ -47,13 +49,19 @@ export class CredentialStatusService {
       throw new ConflictException('Credential is already revoked');
     }
 
-    return this.changeStatus(
-      credential.id,
-      credential.status,
-      CredentialStatus.REVOKED,
-      input.changedBy,
-      input.reason,
-    );
+    if (credential.status === CredentialStatus.EXPIRED) {
+      throw new ConflictException('An expired credential cannot be revoked');
+    }
+
+    return this.changeStatus({
+      credentialId: credential.id,
+      issuerOrganizationId: input.issuerOrganizationId,
+      previousStatus: credential.status,
+      newStatus: CredentialStatus.REVOKED,
+      changedBy: input.changedBy,
+      reason: input.reason,
+      auditAction: 'CREDENTIAL_REVOKED',
+    });
   }
 
   async reactivate(input: ChangeCredentialStatusInput) {
@@ -68,13 +76,15 @@ export class CredentialStatusService {
       );
     }
 
-    return this.changeStatus(
-      credential.id,
-      credential.status,
-      CredentialStatus.ACTIVE,
-      input.changedBy,
-      input.reason,
-    );
+    return this.changeStatus({
+      credentialId: credential.id,
+      issuerOrganizationId: input.issuerOrganizationId,
+      previousStatus: credential.status,
+      newStatus: CredentialStatus.ACTIVE,
+      changedBy: input.changedBy,
+      reason: input.reason,
+      auditAction: 'CREDENTIAL_REACTIVATED',
+    });
   }
 
   async getStatus(credentialId: string) {
@@ -152,30 +162,51 @@ export class CredentialStatusService {
     return credential;
   }
 
-  private async changeStatus(
-    credentialId: string,
-    previousStatus: CredentialStatus,
-    newStatus: CredentialStatus,
-    changedBy: string,
-    reason?: string,
-  ) {
+  private async changeStatus(input: {
+    credentialId: string;
+    issuerOrganizationId: string;
+    previousStatus: CredentialStatus;
+    newStatus: CredentialStatus;
+    changedBy: string;
+    reason?: string;
+    auditAction: string;
+  }) {
     return this.prisma.$transaction(async (transaction) => {
       const credential = await transaction.credential.update({
         where: {
-          id: credentialId,
+          id: input.credentialId,
         },
         data: {
-          status: newStatus,
+          status: input.newStatus,
         },
       });
 
       await transaction.credentialStatusHistory.create({
         data: {
-          credentialId,
-          previousStatus,
-          newStatus,
-          changedBy,
-          reason,
+          credentialId: input.credentialId,
+          previousStatus: input.previousStatus,
+          newStatus: input.newStatus,
+          changedBy: input.changedBy,
+          reason: input.reason,
+        },
+      });
+
+      await transaction.auditLog.create({
+        data: {
+          actorId: input.changedBy,
+          organizationId: input.issuerOrganizationId,
+          action: input.auditAction,
+          resourceType: 'Credential',
+          resourceId: input.credentialId,
+          metadata: {
+            previousStatus: input.previousStatus,
+            newStatus: input.newStatus,
+            ...(input.reason
+              ? {
+                  reason: input.reason,
+                }
+              : {}),
+          },
         },
       });
 

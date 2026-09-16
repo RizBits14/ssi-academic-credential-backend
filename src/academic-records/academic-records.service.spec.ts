@@ -1,22 +1,44 @@
-import { describe, expect, it, jest } from '@jest/globals';
+import { beforeEach, describe, expect, it, jest } from '@jest/globals';
+
 import { PrismaService } from '../prisma/prisma.service';
 import { AcademicRecordsService } from './academic-records.service';
 
 describe('AcademicRecordsService', () => {
-  const mockPrisma = {
+  const transactionClient = {
     academicRecord: {
       create: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+    },
+
+    auditLog: {
+      create: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+    },
+  };
+
+  const mockPrisma = {
+    academicRecord: {
       findUnique: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
       findMany: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
       update: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
     },
+
+    $transaction: jest.fn(
+      async (
+        callback: (transaction: typeof transactionClient) => Promise<unknown>,
+      ) => callback(transactionClient),
+    ),
   };
 
-  const service = new AcademicRecordsService(
-    mockPrisma as unknown as PrismaService,
-  );
+  let service: AcademicRecordsService;
 
-  it('should create an academic record', async () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+
+    service = new AcademicRecordsService(
+      mockPrisma as unknown as PrismaService,
+    );
+  });
+
+  it('should create an academic record and audit log in one transaction', async () => {
     const input = {
       universityId: 'university-id',
       holderId: 'holder-id',
@@ -26,17 +48,62 @@ describe('AcademicRecordsService', () => {
       major: 'Computer Science',
       cgpa: 3.75,
       graduationYear: 2026,
+      actorId: 'issuer-admin-id',
     };
 
-    mockPrisma.academicRecord.create.mockResolvedValue(input);
+    transactionClient.academicRecord.create.mockResolvedValue({
+      id: 'record-id',
+      universityId: 'university-id',
+      holderId: 'holder-id',
+      studentId: '20260001',
+      fullName: 'Sample Applicant',
+      degree: 'Bachelor of Science',
+      major: 'Computer Science',
+      cgpa: 3.75,
+      graduationYear: 2026,
+    });
+
+    transactionClient.auditLog.create.mockResolvedValue({
+      id: 'audit-id',
+    });
 
     const result = await service.create(input);
 
-    expect(mockPrisma.academicRecord.create).toHaveBeenCalledWith({
-      data: input,
+    expect(mockPrisma.$transaction).toHaveBeenCalled();
+
+    expect(transactionClient.academicRecord.create).toHaveBeenCalledWith({
+      data: {
+        universityId: 'university-id',
+        holderId: 'holder-id',
+        studentId: '20260001',
+        fullName: 'Sample Applicant',
+        degree: 'Bachelor of Science',
+        major: 'Computer Science',
+        cgpa: 3.75,
+        graduationYear: 2026,
+      },
     });
 
-    expect(result).toEqual(input);
+    expect(transactionClient.auditLog.create).toHaveBeenCalledWith({
+      data: {
+        actorId: 'issuer-admin-id',
+        organizationId: 'university-id',
+        action: 'ACADEMIC_RECORD_CREATED',
+        resourceType: 'AcademicRecord',
+        resourceId: 'record-id',
+        metadata: {
+          holderId: 'holder-id',
+          studentId: '20260001',
+        },
+      },
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        id: 'record-id',
+        studentId: '20260001',
+      }),
+    );
   });
 
   it('should find an academic record by id', async () => {

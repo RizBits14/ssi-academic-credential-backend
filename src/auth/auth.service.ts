@@ -5,7 +5,9 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
+
 import { UserRole } from '../generated/prisma/enums';
+import { PrismaService } from '../prisma/prisma.service';
 import { UsersService } from '../users/users.service';
 import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
@@ -27,6 +29,7 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly refreshTokenService: RefreshTokenService,
+    private readonly prisma: PrismaService,
   ) {}
 
   async registerHolder(dto: RegisterDto) {
@@ -71,6 +74,18 @@ export class AuthService {
     }
 
     const tokens = await this.issueTokens(user.id, user.email, user.role);
+
+    await this.prisma.auditLog.create({
+      data: {
+        actorId: user.id,
+        action: 'LOGIN',
+        resourceType: 'User',
+        resourceId: user.id,
+        metadata: {
+          role: user.role,
+        },
+      },
+    });
 
     return {
       ...tokens,
@@ -117,6 +132,19 @@ export class AuthService {
     return this.issueTokens(user.id, user.email, user.role);
   }
 
+  async logout(userId: string, dto: RefreshTokenDto): Promise<void> {
+    await this.refreshTokenService.revokeToken(dto.refreshToken, userId);
+
+    await this.prisma.auditLog.create({
+      data: {
+        actorId: userId,
+        action: 'LOGOUT',
+        resourceType: 'User',
+        resourceId: userId,
+      },
+    });
+  }
+
   private async issueTokens(userId: string, email: string, role: UserRole) {
     const payload = {
       sub: userId,
@@ -145,9 +173,5 @@ export class AuthService {
       accessToken,
       refreshToken,
     };
-  }
-
-  async logout(userId: string, dto: RefreshTokenDto): Promise<void> {
-    await this.refreshTokenService.revokeToken(dto.refreshToken, userId);
   }
 }

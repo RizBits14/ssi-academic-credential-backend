@@ -302,7 +302,7 @@ model TrustedIssuer {
 model CredentialStatusHistory {
   id             String           @id @default(uuid())
   credentialId   String
-  previousStatus CredentialStatus
+  previousStatus CredentialStatus?
   newStatus      CredentialStatus
   reason         String?
   changedBy      String
