@@ -6,12 +6,17 @@ import {
 } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 
+import { CredentialSchemasService } from '../credential-schemas/credential-schemas.service';
 import { EncryptionService } from '../crypto/encryption.service';
 import { SignatureService } from '../crypto/signature.service';
 import { DidService } from '../did/did.service';
-import { VerificationRequestStatus } from '../generated/prisma/enums';
+import {
+  CredentialStatus,
+  VerificationRequestStatus,
+} from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
+import { TrustRegistryService } from '../trust-registry/trust-registry.service';
 
 interface VerificationSession {
   applicationId: string;
@@ -29,6 +34,8 @@ export class VerificationService {
     private readonly encryptionService: EncryptionService,
     private readonly signatureService: SignatureService,
     private readonly didService: DidService,
+    private readonly trustRegistryService: TrustRegistryService,
+    private readonly credentialSchemasService: CredentialSchemasService,
   ) {}
 
   async validateRequestContext(presentationId: string) {
@@ -144,7 +151,6 @@ export class VerificationService {
     );
 
     const holderSignature = holderProof.signature;
-
     const holderVerificationMethod = holderProof.verificationMethod;
 
     if (
@@ -271,6 +277,199 @@ export class VerificationService {
         issuerSignatureValid: true,
       },
     };
+  }
+
+  async validateCredentialChecks(presentationId: string) {
+    const context = await this.validateCryptographicChecks(presentationId);
+
+    const { presentation, request, session, unsignedCredential } = context;
+
+    const credential = presentation.credential;
+
+    const issuerTrusted = await this.trustRegistryService.isTrusted(
+      credential.issuerDid,
+    );
+
+    if (!issuerTrusted) {
+      throw new BadRequestException('Credential issuer is not trusted');
+    }
+
+    if (credential.status === CredentialStatus.REVOKED) {
+      throw new BadRequestException('Credential has been revoked');
+    }
+
+    if (credential.status === CredentialStatus.SUSPENDED) {
+      throw new BadRequestException('Credential has been suspended');
+    }
+
+    if (credential.status === CredentialStatus.EXPIRED) {
+      throw new BadRequestException('Credential has expired');
+    }
+
+    if (credential.status !== CredentialStatus.ACTIVE) {
+      throw new BadRequestException('Credential is not active');
+    }
+
+    if (credential.expiresAt && credential.expiresAt.getTime() <= Date.now()) {
+      throw new BadRequestException('Credential has expired');
+    }
+
+    const schema = await this.credentialSchemasService.findById(
+      credential.schemaId,
+    );
+
+    if (schema.organizationId !== credential.issuerOrganizationId) {
+      throw new BadRequestException(
+        'Credential schema does not belong to issuer',
+      );
+    }
+
+    if (schema.status !== 'ACTIVE') {
+      throw new BadRequestException('Credential schema is not active');
+    }
+
+    const credentialSubject = this.requireRecord(
+      unsignedCredential.credentialSubject,
+      'Credential subject is invalid',
+    );
+
+    const issuer = this.requireRecord(
+      unsignedCredential.issuer,
+      'Credential issuer is invalid',
+    );
+
+    if (issuer.id !== credential.issuerDid) {
+      throw new BadRequestException(
+        'Credential issuer DID does not match stored issuer',
+      );
+    }
+
+    if (
+      credentialSubject.id !== presentation.holderDid ||
+      credentialSubject.id !== credential.holderDid
+    ) {
+      throw new BadRequestException(
+        'Credential holder DID does not match presentation holder',
+      );
+    }
+
+    const metadata = this.requireRecord(
+      unsignedCredential.metadata,
+      'Credential metadata is invalid',
+    );
+
+    if (
+      metadata.schema !== schema.name ||
+      metadata.schemaVersion !== schema.version
+    ) {
+      throw new BadRequestException('Credential schema metadata is invalid');
+    }
+
+    const credentialClaims: Record<string, unknown> = {
+      ...credentialSubject,
+    };
+
+    if (typeof issuer.name === 'string') {
+      credentialClaims.university = issuer.name;
+    }
+
+    this.credentialSchemasService.validateClaims(
+      schema.schemaJson,
+      credentialClaims,
+    );
+
+    const disclosedClaims = this.requireRecord(
+      presentation.disclosedClaims,
+      'Disclosed claims are invalid',
+    );
+
+    const disclosedClaimNames = Object.keys(disclosedClaims);
+
+    if (disclosedClaimNames.length === 0) {
+      throw new BadRequestException('No claims were disclosed');
+    }
+
+    const databaseRequestedClaims = this.requireStringArray(
+      request.requestedClaims,
+      'Stored requested claims are invalid',
+    );
+
+    const sessionRequestedClaims = this.requireStringArray(
+      session.requestedClaims,
+      'Verification session requested claims are invalid',
+    );
+
+    if (!this.sameStringSet(databaseRequestedClaims, sessionRequestedClaims)) {
+      throw new BadRequestException(
+        'Verification session requested claims mismatch',
+      );
+    }
+
+    for (const claim of disclosedClaimNames) {
+      if (
+        !databaseRequestedClaims.includes(claim) ||
+        !sessionRequestedClaims.includes(claim)
+      ) {
+        throw new BadRequestException(
+          `Disclosed claim was not requested: ${claim}`,
+        );
+      }
+
+      if (!Object.prototype.hasOwnProperty.call(credentialClaims, claim)) {
+        throw new BadRequestException(
+          `Credential does not contain disclosed claim: ${claim}`,
+        );
+      }
+
+      const disclosedValue = disclosedClaims[claim];
+      const credentialValue = credentialClaims[claim];
+
+      if (
+        this.canonicalize(disclosedValue) !== this.canonicalize(credentialValue)
+      ) {
+        throw new BadRequestException(
+          `Disclosed claim does not match credential: ${claim}`,
+        );
+      }
+    }
+
+    return {
+      ...context,
+      schema,
+      credentialClaims,
+      checks: {
+        ...context.checks,
+        issuerTrusted: true,
+        credentialStatusValid: true,
+        credentialNotExpired: true,
+        schemaValid: true,
+        holderMatches: true,
+        claimsValid: true,
+      },
+    };
+  }
+
+  private requireStringArray(value: unknown, errorMessage: string): string[] {
+    if (
+      !Array.isArray(value) ||
+      value.length === 0 ||
+      !value.every((item) => typeof item === 'string' && item.length > 0)
+    ) {
+      throw new BadRequestException(errorMessage);
+    }
+
+    return value as string[];
+  }
+
+  private sameStringSet(first: string[], second: string[]): boolean {
+    if (first.length !== second.length) {
+      return false;
+    }
+
+    const firstSorted = [...first].sort();
+    const secondSorted = [...second].sort();
+
+    return firstSorted.every((value, index) => value === secondSorted[index]);
   }
 
   private canonicalize(value: unknown): string {

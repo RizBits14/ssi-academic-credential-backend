@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 
+import type { Prisma } from '../generated/prisma/client';
 import { EncryptionService } from '../crypto/encryption.service';
 import { DidService } from '../did/did.service';
 import {
@@ -15,8 +16,6 @@ import {
 } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
-
-import type { Prisma } from '../generated/prisma/client';
 
 interface CreateVerificationRequestInput {
   applicationId: string;
@@ -413,9 +412,17 @@ export class VerificationRequestsService {
       throw new BadRequestException('Credential subject is invalid');
     }
 
+    const issuer = this.isRecord(credential.issuer) ? credential.issuer : null;
+
     const disclosedClaims: Record<string, unknown> = {};
 
     for (const claim of approvedClaims) {
+      if (claim === 'university' && issuer && typeof issuer.name === 'string') {
+        disclosedClaims[claim] = issuer.name;
+
+        continue;
+      }
+
       if (!Object.prototype.hasOwnProperty.call(credentialSubject, claim)) {
         throw new BadRequestException(
           `Credential does not contain claim: ${claim}`,
