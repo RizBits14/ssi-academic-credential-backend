@@ -6,6 +6,8 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Request } from 'express';
+
+import { UsersService } from '../../users/users.service';
 import { AccessTokenPayload } from '../interfaces/access-token-payload.interface';
 
 export interface AuthenticatedRequest extends Request {
@@ -14,7 +16,10 @@ export interface AuthenticatedRequest extends Request {
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
-  constructor(private readonly jwtService: JwtService) {}
+  constructor(
+    private readonly jwtService: JwtService,
+    private readonly usersService: UsersService,
+  ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
@@ -25,14 +30,33 @@ export class JwtAuthGuard implements CanActivate {
       throw new UnauthorizedException('Access token is required');
     }
 
-    try {
-      request.user =
-        await this.jwtService.verifyAsync<AccessTokenPayload>(token);
+    let payload: AccessTokenPayload;
 
-      return true;
+    try {
+      payload = await this.jwtService.verifyAsync<AccessTokenPayload>(token, {
+        algorithms: ['HS256'],
+      });
     } catch {
       throw new UnauthorizedException('Invalid or expired access token');
     }
+
+    if (!payload.sub || typeof payload.sub !== 'string') {
+      throw new UnauthorizedException('Invalid or expired access token');
+    }
+
+    const user = await this.usersService.findById(payload.sub);
+
+    if (!user) {
+      throw new UnauthorizedException('Invalid or expired access token');
+    }
+
+    request.user = {
+      sub: user.id,
+      email: user.email,
+      role: user.role,
+    };
+
+    return true;
   }
 
   private extractToken(request: Request): string | undefined {
@@ -44,6 +68,10 @@ export class JwtAuthGuard implements CanActivate {
 
     const [type, token] = authorization.split(' ');
 
-    return type === 'Bearer' ? token : undefined;
+    if (type !== 'Bearer' || !token) {
+      return undefined;
+    }
+
+    return token;
   }
 }

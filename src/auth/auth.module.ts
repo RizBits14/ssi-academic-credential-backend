@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
+
 import { RolesGuard } from '../common/guards/roles.guard';
 import { UsersModule } from '../users/users.module';
 import { AuthController } from './auth.controller';
@@ -18,6 +19,7 @@ import { RefreshTokenService } from './refresh-token.service';
         secret: configService.getOrThrow<string>('JWT_ACCESS_SECRET'),
         signOptions: {
           expiresIn: '15m',
+          algorithm: 'HS256',
         },
       }),
     }),

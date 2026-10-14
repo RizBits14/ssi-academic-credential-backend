@@ -116,6 +116,7 @@ export class AuthService {
         dto.refreshToken,
         {
           secret: this.configService.getOrThrow<string>('JWT_REFRESH_SECRET'),
+          algorithms: ['HS256'],
         },
       );
     } catch {
@@ -181,6 +182,7 @@ export class AuthService {
       {
         secret: this.configService.getOrThrow<string>('JWT_REFRESH_SECRET'),
         expiresIn: '7d',
+        algorithm: 'HS256',
       },
     );
 
