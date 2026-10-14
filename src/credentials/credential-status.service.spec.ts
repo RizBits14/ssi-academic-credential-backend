@@ -1,3 +1,4 @@
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 import { CredentialStatus } from '../generated/prisma/enums';
@@ -7,11 +8,14 @@ import { CredentialStatusService } from './credential-status.service';
 describe('CredentialStatusService', () => {
   const transactionClient = {
     credential: {
-      update: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+      updateMany: jest.fn<(...args: unknown[]) => Promise<{ count: number }>>(),
+      findFirst: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
     },
+
     credentialStatusHistory: {
       create: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
     },
+
     auditLog: {
       create: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
     },
@@ -20,11 +24,12 @@ describe('CredentialStatusService', () => {
   const mockPrismaService = {
     credential: {
       findFirst: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
-      findUnique: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
     },
+
     credentialStatusHistory: {
       findMany: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
     },
+
     $transaction: jest.fn(
       async (
         callback: (transaction: typeof transactionClient) => Promise<unknown>,
@@ -49,8 +54,13 @@ describe('CredentialStatusService', () => {
       status: CredentialStatus.ACTIVE,
     });
 
-    transactionClient.credential.update.mockResolvedValue({
+    transactionClient.credential.updateMany.mockResolvedValue({
+      count: 1,
+    });
+
+    transactionClient.credential.findFirst.mockResolvedValue({
       id: 'credential-id',
+      issuerOrganizationId: 'university-id',
       status: CredentialStatus.SUSPENDED,
     });
 
@@ -69,9 +79,11 @@ describe('CredentialStatusService', () => {
       reason: 'Under investigation',
     });
 
-    expect(transactionClient.credential.update).toHaveBeenCalledWith({
+    expect(transactionClient.credential.updateMany).toHaveBeenCalledWith({
       where: {
         id: 'credential-id',
+        issuerOrganizationId: 'university-id',
+        status: CredentialStatus.ACTIVE,
       },
       data: {
         status: CredentialStatus.SUSPENDED,
@@ -119,8 +131,13 @@ describe('CredentialStatusService', () => {
       status: CredentialStatus.ACTIVE,
     });
 
-    transactionClient.credential.update.mockResolvedValue({
+    transactionClient.credential.updateMany.mockResolvedValue({
+      count: 1,
+    });
+
+    transactionClient.credential.findFirst.mockResolvedValue({
       id: 'credential-id',
+      issuerOrganizationId: 'university-id',
       status: CredentialStatus.REVOKED,
     });
 
@@ -137,6 +154,17 @@ describe('CredentialStatusService', () => {
       issuerOrganizationId: 'university-id',
       changedBy: 'issuer-admin-id',
       reason: 'Incorrect academic record',
+    });
+
+    expect(transactionClient.credential.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'credential-id',
+        issuerOrganizationId: 'university-id',
+        status: CredentialStatus.ACTIVE,
+      },
+      data: {
+        status: CredentialStatus.REVOKED,
+      },
     });
 
     expect(transactionClient.auditLog.create).toHaveBeenCalledWith({
@@ -168,8 +196,13 @@ describe('CredentialStatusService', () => {
       status: CredentialStatus.SUSPENDED,
     });
 
-    transactionClient.credential.update.mockResolvedValue({
+    transactionClient.credential.updateMany.mockResolvedValue({
+      count: 1,
+    });
+
+    transactionClient.credential.findFirst.mockResolvedValue({
       id: 'credential-id',
+      issuerOrganizationId: 'university-id',
       status: CredentialStatus.ACTIVE,
     });
 
@@ -185,6 +218,17 @@ describe('CredentialStatusService', () => {
       credentialId: 'credential-id',
       issuerOrganizationId: 'university-id',
       changedBy: 'issuer-admin-id',
+    });
+
+    expect(transactionClient.credential.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'credential-id',
+        issuerOrganizationId: 'university-id',
+        status: CredentialStatus.SUSPENDED,
+      },
+      data: {
+        status: CredentialStatus.ACTIVE,
+      },
     });
 
     expect(transactionClient.auditLog.create).toHaveBeenCalledWith({
@@ -238,5 +282,110 @@ describe('CredentialStatusService', () => {
         changedBy: 'issuer-admin-id',
       }),
     ).rejects.toThrow('An expired credential cannot be revoked');
+  });
+
+  it('should scope credential status lookup to the issuer organization', async () => {
+    mockPrismaService.credential.findFirst.mockResolvedValue({
+      id: 'credential-id',
+      status: CredentialStatus.ACTIVE,
+      expiresAt: null,
+    });
+
+    const result = await service.getStatus('credential-id', 'university-id');
+
+    expect(mockPrismaService.credential.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: 'credential-id',
+        issuerOrganizationId: 'university-id',
+      },
+      select: {
+        id: true,
+        status: true,
+        expiresAt: true,
+      },
+    });
+
+    expect(result).toEqual({
+      credentialId: 'credential-id',
+      status: CredentialStatus.ACTIVE,
+      expiresAt: null,
+    });
+  });
+
+  it('should reject status lookup for another organizations credential', async () => {
+    mockPrismaService.credential.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.getStatus('other-university-credential', 'university-id'),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('should scope credential history lookup to the issuer organization', async () => {
+    mockPrismaService.credential.findFirst.mockResolvedValue({
+      id: 'credential-id',
+    });
+
+    mockPrismaService.credentialStatusHistory.findMany.mockResolvedValue([]);
+
+    const result = await service.getHistory('credential-id', 'university-id');
+
+    expect(mockPrismaService.credential.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: 'credential-id',
+        issuerOrganizationId: 'university-id',
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    expect(
+      mockPrismaService.credentialStatusHistory.findMany,
+    ).toHaveBeenCalledWith({
+      where: {
+        credentialId: 'credential-id',
+      },
+      include: {
+        changedByUser: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            role: true,
+          },
+        },
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+    });
+
+    expect(result).toEqual([]);
+  });
+
+  it('should reject a status mutation when the credential changes concurrently', async () => {
+    mockPrismaService.credential.findFirst.mockResolvedValue({
+      id: 'credential-id',
+      issuerOrganizationId: 'university-id',
+      status: CredentialStatus.ACTIVE,
+    });
+
+    transactionClient.credential.updateMany.mockResolvedValue({
+      count: 0,
+    });
+
+    await expect(
+      service.suspend({
+        credentialId: 'credential-id',
+        issuerOrganizationId: 'university-id',
+        changedBy: 'issuer-admin-id',
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+
+    expect(
+      transactionClient.credentialStatusHistory.create,
+    ).not.toHaveBeenCalled();
+
+    expect(transactionClient.auditLog.create).not.toHaveBeenCalled();
   });
 });

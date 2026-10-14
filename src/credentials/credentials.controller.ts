@@ -123,25 +123,35 @@ export class CredentialsController {
 
   @ApiProtectedEndpoint('Get current credential status')
   @Get(':id/status')
-  async getStatus(@Param('id', ParseUUIDPipe) id: string) {
-    return this.credentialStatusService.getStatus(id);
+  async getStatus(
+    @Req() request: AuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    const universityId = await this.getUniversityId(request.user.sub);
+
+    return this.credentialStatusService.getStatus(id, universityId);
   }
 
   @ApiProtectedEndpoint('Get credential status history')
   @Get(':id/status-history')
-  async getHistory(@Param('id', ParseUUIDPipe) id: string) {
-    return this.credentialStatusService.getHistory(id);
+  async getHistory(
+    @Req() request: AuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    const universityId = await this.getUniversityId(request.user.sub);
+
+    return this.credentialStatusService.getHistory(id, universityId);
   }
 
   private async getUniversityId(userId: string): Promise<string> {
     const membership =
-      await this.organizationsService.findMembershipForUser(userId);
+      await this.organizationsService.findActiveMembershipForUser(
+        userId,
+        OrganizationType.UNIVERSITY,
+      );
 
-    if (
-      !membership ||
-      membership.organization.type !== OrganizationType.UNIVERSITY
-    ) {
-      throw new NotFoundException('University membership not found');
+    if (!membership) {
+      throw new NotFoundException('Active university membership not found');
     }
 
     return membership.organization.id;

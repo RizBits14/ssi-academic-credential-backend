@@ -87,10 +87,11 @@ export class CredentialStatusService {
     });
   }
 
-  async getStatus(credentialId: string) {
-    const credential = await this.prisma.credential.findUnique({
+  async getStatus(credentialId: string, issuerOrganizationId: string) {
+    const credential = await this.prisma.credential.findFirst({
       where: {
         id: credentialId,
+        issuerOrganizationId,
       },
       select: {
         id: true,
@@ -110,10 +111,11 @@ export class CredentialStatusService {
     };
   }
 
-  async getHistory(credentialId: string) {
-    const credential = await this.prisma.credential.findUnique({
+  async getHistory(credentialId: string, issuerOrganizationId: string) {
+    const credential = await this.prisma.credential.findFirst({
       where: {
         id: credentialId,
+        issuerOrganizationId,
       },
       select: {
         id: true,
@@ -172,14 +174,20 @@ export class CredentialStatusService {
     auditAction: string;
   }) {
     return this.prisma.$transaction(async (transaction) => {
-      const credential = await transaction.credential.update({
+      const updateResult = await transaction.credential.updateMany({
         where: {
           id: input.credentialId,
+          issuerOrganizationId: input.issuerOrganizationId,
+          status: input.previousStatus,
         },
         data: {
           status: input.newStatus,
         },
       });
+
+      if (updateResult.count !== 1) {
+        throw new ConflictException('Credential status changed; retry request');
+      }
 
       await transaction.credentialStatusHistory.create({
         data: {
@@ -209,6 +217,17 @@ export class CredentialStatusService {
           },
         },
       });
+
+      const credential = await transaction.credential.findFirst({
+        where: {
+          id: input.credentialId,
+          issuerOrganizationId: input.issuerOrganizationId,
+        },
+      });
+
+      if (!credential) {
+        throw new NotFoundException('Credential not found');
+      }
 
       return credential;
     });
