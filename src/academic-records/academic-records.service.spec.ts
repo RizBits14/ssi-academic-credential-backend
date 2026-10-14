@@ -1,3 +1,4 @@
+import { NotFoundException } from '@nestjs/common';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 import { PrismaService } from '../prisma/prisma.service';
@@ -16,9 +17,10 @@ describe('AcademicRecordsService', () => {
 
   const mockPrisma = {
     academicRecord: {
-      findUnique: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+      findFirst: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
       findMany: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
-      update: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+      count: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+      updateMany: jest.fn<(...args: unknown[]) => Promise<{ count: number }>>(),
     },
 
     $transaction: jest.fn(
@@ -106,17 +108,39 @@ describe('AcademicRecordsService', () => {
     );
   });
 
-  it('should find an academic record by id', async () => {
+  it('should find an academic record only within the specified university', async () => {
     const record = {
       id: 'record-id',
+      universityId: 'university-id',
       studentId: '20260001',
     };
 
-    mockPrisma.academicRecord.findUnique.mockResolvedValue(record);
+    mockPrisma.academicRecord.findFirst.mockResolvedValue(record);
 
-    const result = await service.findById('record-id');
+    const result = await service.findByIdForUniversity(
+      'record-id',
+      'university-id',
+    );
+
+    expect(mockPrisma.academicRecord.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: 'record-id',
+        universityId: 'university-id',
+      },
+    });
 
     expect(result).toEqual(record);
+  });
+
+  it('should reject an academic record outside the specified university', async () => {
+    mockPrisma.academicRecord.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.findByIdForUniversity(
+        'record-from-another-university',
+        'university-id',
+      ),
+    ).rejects.toBeInstanceOf(NotFoundException);
   });
 
   it('should list records for a university', async () => {
@@ -136,28 +160,27 @@ describe('AcademicRecordsService', () => {
     expect(result).toEqual([]);
   });
 
-  it('should update an academic record', async () => {
-    const existingRecord = {
+  it('should update an academic record only within the specified university', async () => {
+    const updatedRecord = {
       id: 'record-id',
       universityId: 'university-id',
-      major: 'Computer Science',
-    };
-
-    const updatedRecord = {
-      ...existingRecord,
       major: 'Software Engineering',
     };
 
-    mockPrisma.academicRecord.findUnique.mockResolvedValue(existingRecord);
-    mockPrisma.academicRecord.update.mockResolvedValue(updatedRecord);
+    mockPrisma.academicRecord.updateMany.mockResolvedValue({
+      count: 1,
+    });
 
-    const result = await service.update('record-id', {
+    mockPrisma.academicRecord.findFirst.mockResolvedValue(updatedRecord);
+
+    const result = await service.update('record-id', 'university-id', {
       major: 'Software Engineering',
     });
 
-    expect(mockPrisma.academicRecord.update).toHaveBeenCalledWith({
+    expect(mockPrisma.academicRecord.updateMany).toHaveBeenCalledWith({
       where: {
         id: 'record-id',
+        universityId: 'university-id',
       },
       data: {
         major: 'Software Engineering',
@@ -165,5 +188,19 @@ describe('AcademicRecordsService', () => {
     });
 
     expect(result).toEqual(updatedRecord);
+  });
+
+  it('should reject updates to records outside the specified university', async () => {
+    mockPrisma.academicRecord.updateMany.mockResolvedValue({
+      count: 0,
+    });
+
+    await expect(
+      service.update('record-from-another-university', 'university-id', {
+        major: 'Software Engineering',
+      }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+
+    expect(mockPrisma.academicRecord.findFirst).not.toHaveBeenCalled();
   });
 });

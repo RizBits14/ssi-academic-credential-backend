@@ -84,13 +84,7 @@ export class AcademicRecordsController {
   async findOne(@Req() request: AuthenticatedRequest, @Param('id') id: string) {
     const universityId = await this.getUniversityId(request.user.sub);
 
-    const record = await this.academicRecordsService.findById(id);
-
-    if (record.universityId !== universityId) {
-      throw new NotFoundException('Academic record not found');
-    }
-
-    return record;
+    return this.academicRecordsService.findByIdForUniversity(id, universityId);
   }
 
   @ApiProtectedEndpoint('Update an academic record')
@@ -102,13 +96,7 @@ export class AcademicRecordsController {
   ) {
     const universityId = await this.getUniversityId(request.user.sub);
 
-    const record = await this.academicRecordsService.findById(id);
-
-    if (record.universityId !== universityId) {
-      throw new NotFoundException('Academic record not found');
-    }
-
-    return this.academicRecordsService.update(id, {
+    return this.academicRecordsService.update(id, universityId, {
       fullName: dto.fullName,
       degree: dto.degree,
       department: dto.department,

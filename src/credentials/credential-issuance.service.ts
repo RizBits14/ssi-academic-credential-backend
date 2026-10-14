@@ -5,19 +5,20 @@ import {
 } from '@nestjs/common';
 
 import { AcademicRecordsService } from '../academic-records/academic-records.service';
+import { createPaginationMeta } from '../common/utils/pagination.util';
 import { CredentialSchemasService } from '../credential-schemas/credential-schemas.service';
 import { DidService } from '../did/did.service';
+import type { Prisma } from '../generated/prisma/client';
 import {
   CredentialStatus,
   DidOwnerType,
   DidStatus,
+  OrganizationStatus,
   OrganizationType,
 } from '../generated/prisma/enums';
 import { OrganizationsService } from '../organizations/organizations.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CredentialsService } from './credentials.service';
-import type { Prisma } from '../generated/prisma/client';
-import { createPaginationMeta } from '../common/utils/pagination.util';
 
 interface PrepareCredentialIssuanceInput {
   issuerOrganizationId: string;
@@ -56,13 +57,15 @@ export class CredentialIssuanceService {
       );
     }
 
-    const academicRecord = await this.academicRecordsService.findById(
-      input.academicRecordId,
-    );
-
-    if (academicRecord.universityId !== organization.id) {
-      throw new NotFoundException('Academic record not found');
+    if (organization.status !== OrganizationStatus.ACTIVE) {
+      throw new ConflictException('Issuer organization is not active');
     }
+
+    const academicRecord =
+      await this.academicRecordsService.findByIdForUniversity(
+        input.academicRecordId,
+        organization.id,
+      );
 
     const schema = await this.credentialSchemasService.findById(input.schemaId);
 
@@ -298,7 +301,6 @@ export class CredentialIssuanceService {
 
     return {
       data,
-
       meta: createPaginationMeta(input.page, input.limit, total),
     };
   }

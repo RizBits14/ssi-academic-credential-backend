@@ -1,12 +1,15 @@
-import { describe, expect, it, jest } from '@jest/globals';
+import { ConflictException } from '@nestjs/common';
+import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 import { AcademicRecordsService } from '../academic-records/academic-records.service';
 import { CredentialSchemasService } from '../credential-schemas/credential-schemas.service';
 import { DidService } from '../did/did.service';
+import { CredentialsService } from './credentials.service';
 import {
   CredentialStatus,
   DidOwnerType,
   DidStatus,
+  OrganizationStatus,
   OrganizationType,
 } from '../generated/prisma/enums';
 import { OrganizationsService } from '../organizations/organizations.service';
@@ -15,7 +18,7 @@ import { CredentialIssuanceService } from './credential-issuance.service';
 
 describe('CredentialIssuanceService', () => {
   const mockAcademicRecordsService = {
-    findById: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+    findByIdForUniversity: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
   };
 
   const mockCredentialSchemasService = {
@@ -82,18 +85,23 @@ describe('CredentialIssuanceService', () => {
     mockCredentialSchemasService as unknown as CredentialSchemasService,
     mockOrganizationsService as unknown as OrganizationsService,
     mockDidService as unknown as DidService,
-    mockCredentialsService,
+    mockCredentialsService as unknown as CredentialsService,
     mockPrismaService as unknown as PrismaService,
   );
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
 
   it('should prepare a signed and encrypted credential', async () => {
     mockOrganizationsService.findById.mockResolvedValue({
       id: 'university-id',
       name: 'Example University',
       type: OrganizationType.UNIVERSITY,
+      status: OrganizationStatus.ACTIVE,
     });
 
-    mockAcademicRecordsService.findById.mockResolvedValue({
+    mockAcademicRecordsService.findByIdForUniversity.mockResolvedValue({
       id: 'record-id',
       universityId: 'university-id',
       holderId: 'holder-id',
@@ -166,6 +174,10 @@ describe('CredentialIssuanceService', () => {
       schemaId: 'schema-id',
     });
 
+    expect(
+      mockAcademicRecordsService.findByIdForUniversity,
+    ).toHaveBeenCalledWith('record-id', 'university-id');
+
     expect(mockDidService.findByOwner).toHaveBeenNthCalledWith(
       1,
       DidOwnerType.ORGANIZATION,
@@ -195,6 +207,27 @@ describe('CredentialIssuanceService', () => {
         },
       }),
     );
+  });
+
+  it('should reject credential preparation for a suspended university', async () => {
+    mockOrganizationsService.findById.mockResolvedValue({
+      id: 'university-id',
+      name: 'Example University',
+      type: OrganizationType.UNIVERSITY,
+      status: OrganizationStatus.SUSPENDED,
+    });
+
+    await expect(
+      service.prepare({
+        issuerOrganizationId: 'university-id',
+        academicRecordId: 'record-id',
+        schemaId: 'schema-id',
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+
+    expect(
+      mockAcademicRecordsService.findByIdForUniversity,
+    ).not.toHaveBeenCalled();
   });
 
   it('should persist issuance records and audit log in one transaction', async () => {
