@@ -4,7 +4,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { JwtService } from '@nestjs/jwt';
+import { JwtService, type JwtSignOptions } from '@nestjs/jwt';
 import { randomUUID } from 'node:crypto';
 
 import { UserRole } from '../generated/prisma/enums';
@@ -22,6 +22,7 @@ interface RefreshTokenPayload {
   role: UserRole;
   jti: string;
   familyId: string;
+  exp?: number;
 }
 
 @Injectable()
@@ -173,6 +174,10 @@ export class AuthService {
 
     const accessToken = await this.jwtService.signAsync(payload);
 
+    const refreshExpiresIn = this.configService.getOrThrow<string>(
+      'JWT_REFRESH_EXPIRES_IN',
+    );
+
     const refreshToken = await this.jwtService.signAsync(
       {
         ...payload,
@@ -181,14 +186,19 @@ export class AuthService {
       },
       {
         secret: this.configService.getOrThrow<string>('JWT_REFRESH_SECRET'),
-        expiresIn: '7d',
+        expiresIn: refreshExpiresIn as JwtSignOptions['expiresIn'],
         algorithm: 'HS256',
       },
     );
 
-    const refreshTokenExpiresAt = new Date(
-      Date.now() + 7 * 24 * 60 * 60 * 1000,
-    );
+    const decodedRefreshToken =
+      this.jwtService.decode<RefreshTokenPayload>(refreshToken);
+
+    if (!decodedRefreshToken.exp) {
+      throw new Error('Refresh token expiration could not be determined');
+    }
+
+    const refreshTokenExpiresAt = new Date(decodedRefreshToken.exp * 1000);
 
     await this.refreshTokenService.storeToken(
       userId,

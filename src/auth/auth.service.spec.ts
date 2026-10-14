@@ -10,6 +10,25 @@ interface RefreshPayload {
   familyId?: string;
 }
 
+function createConfigServiceMock() {
+  return {
+    getOrThrow: (key: string): string => {
+      const values: Record<string, string> = {
+        JWT_REFRESH_SECRET: 'test-refresh-secret',
+        JWT_REFRESH_EXPIRES_IN: '7d',
+      };
+
+      const value = values[key];
+
+      if (!value) {
+        throw new Error(`Missing test configuration: ${key}`);
+      }
+
+      return value;
+    },
+  };
+}
+
 describe('AuthService - Refresh Token Security', () => {
   it('generates different refresh tokens for simultaneous requests', async () => {
     const jwtService = new JwtService({
@@ -23,9 +42,7 @@ describe('AuthService - Refresh Token Security', () => {
       {} as never,
       {} as never,
       jwtService,
-      {
-        getOrThrow: () => 'test-refresh-secret',
-      } as never,
+      createConfigServiceMock() as never,
       {
         storeToken,
       } as never,
@@ -105,9 +122,7 @@ describe('AuthService - Refresh Token Security', () => {
       } as never,
       {} as never,
       jwtService,
-      {
-        getOrThrow: () => 'test-refresh-secret',
-      } as never,
+      createConfigServiceMock() as never,
       {
         consumeToken,
         storeToken,
@@ -126,6 +141,7 @@ describe('AuthService - Refresh Token Security', () => {
       {
         secret: 'test-refresh-secret',
         expiresIn: '7d',
+        algorithm: 'HS256',
       },
     );
 
@@ -174,9 +190,7 @@ describe('AuthService - Refresh Token Security', () => {
       } as never,
       {} as never,
       jwtService,
-      {
-        getOrThrow: () => 'test-refresh-secret',
-      } as never,
+      createConfigServiceMock() as never,
       {
         consumeToken,
       } as never,
@@ -193,6 +207,7 @@ describe('AuthService - Refresh Token Security', () => {
       {
         secret: 'test-refresh-secret',
         expiresIn: '7d',
+        algorithm: 'HS256',
       },
     );
 

@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { JwtModule } from '@nestjs/jwt';
+import { JwtModule, type JwtSignOptions } from '@nestjs/jwt';
 
 import { RolesGuard } from '../common/guards/roles.guard';
 import { UsersModule } from '../users/users.module';
@@ -15,13 +15,19 @@ import { RefreshTokenService } from './refresh-token.service';
     UsersModule,
     JwtModule.registerAsync({
       inject: [ConfigService],
-      useFactory: (configService: ConfigService) => ({
-        secret: configService.getOrThrow<string>('JWT_ACCESS_SECRET'),
-        signOptions: {
-          expiresIn: '15m',
-          algorithm: 'HS256',
-        },
-      }),
+      useFactory: (configService: ConfigService) => {
+        const accessExpiresIn = configService.getOrThrow<string>(
+          'JWT_ACCESS_EXPIRES_IN',
+        );
+
+        return {
+          secret: configService.getOrThrow<string>('JWT_ACCESS_SECRET'),
+          signOptions: {
+            expiresIn: accessExpiresIn as JwtSignOptions['expiresIn'],
+            algorithm: 'HS256',
+          },
+        };
+      },
     }),
   ],
   controllers: [AuthController],
