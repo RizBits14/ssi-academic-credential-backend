@@ -3,10 +3,11 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+
+import { createPaginationMeta } from '../common/utils/pagination.util';
+import type { Prisma } from '../generated/prisma/client';
 import { OrganizationType } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
-import type { Prisma } from '../generated/prisma/client';
-import { createPaginationMeta } from '../common/utils/pagination.util';
 
 interface CredentialSchemaDefinition {
   name: string;
@@ -76,6 +77,21 @@ export class CredentialSchemasService {
     const schema = await this.prisma.credentialSchema.findUnique({
       where: {
         id,
+      },
+    });
+
+    if (!schema) {
+      throw new NotFoundException('Credential schema not found');
+    }
+
+    return schema;
+  }
+
+  async findByIdForOrganization(id: string, organizationId: string) {
+    const schema = await this.prisma.credentialSchema.findFirst({
+      where: {
+        id,
+        organizationId,
       },
     });
 

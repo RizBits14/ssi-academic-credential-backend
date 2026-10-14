@@ -67,10 +67,13 @@ export class CredentialIssuanceService {
         organization.id,
       );
 
-    const schema = await this.credentialSchemasService.findById(input.schemaId);
+    const schema = await this.credentialSchemasService.findByIdForOrganization(
+      input.schemaId,
+      organization.id,
+    );
 
-    if (schema.organizationId !== organization.id) {
-      throw new NotFoundException('Credential schema not found');
+    if (schema.status !== 'ACTIVE') {
+      throw new ConflictException('Credential schema is not active');
     }
 
     if (schema.status !== 'ACTIVE') {

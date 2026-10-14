@@ -22,7 +22,8 @@ describe('CredentialIssuanceService', () => {
   };
 
   const mockCredentialSchemasService = {
-    findById: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+    findByIdForOrganization:
+      jest.fn<(...args: unknown[]) => Promise<unknown>>(),
     validateClaims: jest.fn<(...args: unknown[]) => void>(),
   };
 
@@ -114,7 +115,7 @@ describe('CredentialIssuanceService', () => {
       graduationYear: 2026,
     });
 
-    mockCredentialSchemasService.findById.mockResolvedValue({
+    mockCredentialSchemasService.findByIdForOrganization.mockResolvedValue({
       id: 'schema-id',
       organizationId: 'university-id',
       name: 'AcademicCredential',
@@ -173,6 +174,10 @@ describe('CredentialIssuanceService', () => {
       academicRecordId: 'record-id',
       schemaId: 'schema-id',
     });
+
+    expect(
+      mockCredentialSchemasService.findByIdForOrganization,
+    ).toHaveBeenCalledWith('schema-id', 'university-id');
 
     expect(
       mockAcademicRecordsService.findByIdForUniversity,
