@@ -7,6 +7,7 @@ import { AuthService } from './auth.service';
 
 interface RefreshPayload {
   jti?: string;
+  familyId?: string;
 }
 
 describe('AuthService - Refresh Token Security', () => {
@@ -25,20 +26,26 @@ describe('AuthService - Refresh Token Security', () => {
       {
         getOrThrow: () => 'test-refresh-secret',
       } as never,
-      { storeToken } as never,
+      {
+        storeToken,
+      } as never,
       {} as never,
     );
+
+    const familyId = 'family-123';
 
     const [first, second] = await Promise.all([
       authService['issueTokens'](
         'user-123',
         'student@example.com',
         UserRole.HOLDER,
+        familyId,
       ),
       authService['issueTokens'](
         'user-123',
         'student@example.com',
         UserRole.HOLDER,
+        familyId,
       ),
     ]);
 
@@ -51,7 +58,11 @@ describe('AuthService - Refresh Token Security', () => {
 
     expect(firstPayload.jti).toBeDefined();
     expect(secondPayload.jti).toBeDefined();
+
     expect(firstPayload.jti).not.toBe(secondPayload.jti);
+
+    expect(firstPayload.familyId).toBe(familyId);
+    expect(secondPayload.familyId).toBe(familyId);
 
     expect(storeToken).toHaveBeenCalledTimes(2);
   });
@@ -68,13 +79,22 @@ describe('AuthService - Refresh Token Security', () => {
       role: UserRole.HOLDER,
     };
 
+    const familyId = 'family-123';
+
     let tokenAvailable = true;
 
-    const consumeToken = jest.fn(() => {
-      const consumed = tokenAvailable;
+    const consumeToken = jest.fn<
+      (
+        token: string,
+        userId: string,
+        familyId: string,
+      ) => Promise<'consumed' | 'invalid'>
+    >(() => {
+      const result = tokenAvailable ? 'consumed' : 'invalid';
+
       tokenAvailable = false;
 
-      return Promise.resolve(consumed);
+      return Promise.resolve(result);
     });
 
     const storeToken = jest.fn(() => Promise.resolve());
@@ -101,6 +121,7 @@ describe('AuthService - Refresh Token Security', () => {
         email: user.email,
         role: user.role,
         jti: 'original-token-id',
+        familyId,
       },
       {
         secret: 'test-refresh-secret',
@@ -111,9 +132,11 @@ describe('AuthService - Refresh Token Security', () => {
     const attemptRefresh = async (): Promise<'success' | 'rejected'> => {
       try {
         await authService.refresh({ refreshToken });
+
         return 'success';
       } catch (error: unknown) {
         expect(error).toBeInstanceOf(UnauthorizedException);
+
         return 'rejected';
       }
     };
@@ -121,9 +144,62 @@ describe('AuthService - Refresh Token Security', () => {
     const results = await Promise.all([attemptRefresh(), attemptRefresh()]);
 
     expect(results.filter((result) => result === 'success')).toHaveLength(1);
+
     expect(results.filter((result) => result === 'rejected')).toHaveLength(1);
 
     expect(consumeToken).toHaveBeenCalledTimes(2);
+
+    expect(consumeToken).toHaveBeenCalledWith(refreshToken, user.id, familyId);
+
     expect(storeToken).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a refresh token that does not contain a token family', async () => {
+    const jwtService = new JwtService({
+      secret: 'test-access-secret',
+      signOptions: { expiresIn: '15m' },
+    });
+
+    const user = {
+      id: 'user-123',
+      email: 'student@example.com',
+      role: UserRole.HOLDER,
+    };
+
+    const consumeToken = jest.fn();
+
+    const authService = new AuthService(
+      {
+        findById: () => Promise.resolve(user),
+      } as never,
+      {} as never,
+      jwtService,
+      {
+        getOrThrow: () => 'test-refresh-secret',
+      } as never,
+      {
+        consumeToken,
+      } as never,
+      {} as never,
+    );
+
+    const refreshToken = await jwtService.signAsync(
+      {
+        sub: user.id,
+        email: user.email,
+        role: user.role,
+        jti: 'token-without-family',
+      },
+      {
+        secret: 'test-refresh-secret',
+        expiresIn: '7d',
+      },
+    );
+
+    await expect(authService.refresh({ refreshToken })).rejects.toBeInstanceOf(
+      UnauthorizedException,
+    );
+
+    expect(consumeToken).not.toHaveBeenCalled();
   });
 });

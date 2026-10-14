@@ -105,6 +105,7 @@ model User {
   verificationRequestsCreated  VerificationRequest[]     @relation("VerificationRequestVerifier")
   verificationRequestsReceived VerificationRequest[]     @relation("VerificationRequestHolder")
   presentations                Presentation[]
+  refreshTokenFamilies         RefreshTokenFamily[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -113,13 +114,28 @@ model User {
 model RefreshToken {
   id        String    @id @default(uuid())
   userId    String
+  familyId  String
   tokenHash String    @unique
   expiresAt DateTime
   revokedAt DateTime?
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user   User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  family RefreshTokenFamily @relation(fields: [familyId], references: [id], onDelete: Cascade)
 
   createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([familyId])
+}
+
+model RefreshTokenFamily {
+  id        String    @id @default(uuid())
+  userId    String
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  user   User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokens RefreshToken[]
 
   @@index([userId])
 }
@@ -300,7 +316,7 @@ model TrustedIssuer {
 }
 
 model CredentialStatusHistory {
-  id             String           @id @default(uuid())
+  id             String            @id @default(uuid())
   credentialId   String
   previousStatus CredentialStatus?
   newStatus      CredentialStatus

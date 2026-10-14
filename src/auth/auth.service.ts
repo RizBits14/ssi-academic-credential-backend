@@ -20,6 +20,8 @@ interface RefreshTokenPayload {
   sub: string;
   email: string;
   role: UserRole;
+  jti: string;
+  familyId: string;
 }
 
 @Injectable()
@@ -74,7 +76,14 @@ export class AuthService {
       throw new UnauthorizedException('Invalid email or password');
     }
 
-    const tokens = await this.issueTokens(user.id, user.email, user.role);
+    const familyId = await this.refreshTokenService.createFamily(user.id);
+
+    const tokens = await this.issueTokens(
+      user.id,
+      user.email,
+      user.role,
+      familyId,
+    );
 
     await this.prisma.auditLog.create({
       data: {
@@ -119,18 +128,21 @@ export class AuthService {
       throw new UnauthorizedException('Invalid refresh token');
     }
 
-    const tokenConsumed = await this.refreshTokenService.consumeToken(
-      dto.refreshToken,
-      user.id,
-    );
-
-    if (!tokenConsumed) {
-      throw new UnauthorizedException(
-        'Refresh token has expired or already been used',
-      );
+    if (!payload.familyId || !payload.jti) {
+      throw new UnauthorizedException('Invalid refresh token');
     }
 
-    return this.issueTokens(user.id, user.email, user.role);
+    const tokenResult = await this.refreshTokenService.consumeToken(
+      dto.refreshToken,
+      user.id,
+      payload.familyId,
+    );
+
+    if (tokenResult !== 'consumed') {
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+
+    return this.issueTokens(user.id, user.email, user.role, payload.familyId);
   }
 
   async logout(userId: string, dto: RefreshTokenDto): Promise<void> {
@@ -146,7 +158,12 @@ export class AuthService {
     });
   }
 
-  private async issueTokens(userId: string, email: string, role: UserRole) {
+  private async issueTokens(
+    userId: string,
+    email: string,
+    role: UserRole,
+    familyId: string,
+  ) {
     const payload = {
       sub: userId,
       email,
@@ -159,6 +176,7 @@ export class AuthService {
       {
         ...payload,
         jti: randomUUID(),
+        familyId,
       },
       {
         secret: this.configService.getOrThrow<string>('JWT_REFRESH_SECRET'),
@@ -172,6 +190,7 @@ export class AuthService {
 
     await this.refreshTokenService.storeToken(
       userId,
+      familyId,
       refreshToken,
       refreshTokenExpiresAt,
     );
