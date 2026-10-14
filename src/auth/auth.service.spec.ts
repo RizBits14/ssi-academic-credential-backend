@@ -84,6 +84,75 @@ describe('AuthService - Refresh Token Security', () => {
     expect(storeToken).toHaveBeenCalledTimes(2);
   });
 
+  it('stores refresh token expiry based on JWT_REFRESH_EXPIRES_IN', async () => {
+    const jwtService = new JwtService({
+      secret: 'test-access-secret',
+      signOptions: { expiresIn: '15m' },
+    });
+
+    const storeToken = jest.fn<
+      (
+        userId: string,
+        familyId: string,
+        token: string,
+        expiresAt: Date,
+      ) => Promise<void>
+    >(() => Promise.resolve());
+
+    const configService = {
+      getOrThrow: (key: string): string => {
+        const values: Record<string, string> = {
+          JWT_REFRESH_SECRET: 'test-refresh-secret',
+          JWT_REFRESH_EXPIRES_IN: '2h',
+        };
+
+        const value = values[key];
+
+        if (!value) {
+          throw new Error(`Missing test configuration: ${key}`);
+        }
+
+        return value;
+      },
+    };
+
+    const authService = new AuthService(
+      {} as never,
+      {} as never,
+      jwtService,
+      configService as never,
+      {
+        storeToken,
+      } as never,
+      {} as never,
+    );
+
+    const result = await authService['issueTokens'](
+      'user-123',
+      'student@example.com',
+      UserRole.HOLDER,
+      'family-123',
+    );
+
+    const decoded = jwtService.decode<{ exp?: number }>(result.refreshToken);
+
+    if (!decoded.exp) {
+      throw new Error('Expected refresh token exp claim');
+    }
+
+    expect(storeToken).toHaveBeenCalledTimes(1);
+
+    const storedCall = storeToken.mock.calls[0];
+
+    if (!storedCall) {
+      throw new Error('Expected refresh token to be stored');
+    }
+
+    const storedExpiresAt = storedCall[3];
+
+    expect(storedExpiresAt.getTime()).toBe(decoded.exp * 1000);
+  });
+
   it('allows only one of two concurrent refresh attempts using the same token', async () => {
     const jwtService = new JwtService({
       secret: 'test-access-secret',
