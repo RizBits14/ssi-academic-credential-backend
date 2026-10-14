@@ -4,13 +4,13 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 
+import { createPaginationMeta } from '../common/utils/pagination.util';
+import type { Prisma } from '../generated/prisma/client';
 import {
   ApplicationStatus,
   EducationVerificationStatus,
 } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
-import type { Prisma } from '../generated/prisma/client';
-import { createPaginationMeta } from '../common/utils/pagination.util';
 
 interface CreateApplicationInput {
   jobId: string;
@@ -102,6 +102,70 @@ export class ApplicationsService {
     return application;
   }
 
+  async findOneForHolder(id: string, holderId: string) {
+    const application = await this.prisma.application.findFirst({
+      where: {
+        id,
+        holderId,
+      },
+      include: {
+        job: {
+          include: {
+            bank: true,
+          },
+        },
+        holder: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            role: true,
+          },
+        },
+      },
+    });
+
+    if (!application) {
+      throw new NotFoundException('Application not found');
+    }
+
+    return application;
+  }
+
+  async findOneForBank(id: string, bankId: string) {
+    const application = await this.prisma.application.findFirst({
+      where: {
+        id,
+        job: {
+          is: {
+            bankId,
+          },
+        },
+      },
+      include: {
+        job: {
+          include: {
+            bank: true,
+          },
+        },
+        holder: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            role: true,
+          },
+        },
+      },
+    });
+
+    if (!application) {
+      throw new NotFoundException('Application not found');
+    }
+
+    return application;
+  }
+
   async findByHolderPaginated(input: {
     holderId: string;
     page: number;
@@ -131,7 +195,6 @@ export class ApplicationsService {
     const [data, total] = await Promise.all([
       this.prisma.application.findMany({
         where,
-
         include: {
           job: {
             include: {
@@ -139,11 +202,9 @@ export class ApplicationsService {
             },
           },
         },
-
         orderBy: {
           createdAt: 'desc',
         },
-
         skip,
         take: input.limit,
       }),

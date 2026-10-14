@@ -1,4 +1,4 @@
-import { describe, expect, it, jest } from '@jest/globals';
+import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 import {
   ApplicationStatus,
@@ -12,16 +12,25 @@ describe('ApplicationsService', () => {
     job: {
       findUnique: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
     },
+
     application: {
       create: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
       findMany: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
       findUnique: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+      findFirst: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+      count: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
     },
   };
 
-  const service = new ApplicationsService(
-    mockPrismaService as unknown as PrismaService,
-  );
+  let service: ApplicationsService;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+
+    service = new ApplicationsService(
+      mockPrismaService as unknown as PrismaService,
+    );
+  });
 
   it('should create an application for an open job', async () => {
     mockPrismaService.job.findUnique.mockResolvedValue({
@@ -93,7 +102,7 @@ describe('ApplicationsService', () => {
     expect(result).toHaveLength(1);
   });
 
-  it('should return an application by id', async () => {
+  it('should keep global application lookup available for internal workflows', async () => {
     mockPrismaService.application.findUnique.mockResolvedValue({
       id: 'application-id',
       holderId: 'holder-id',
@@ -106,5 +115,105 @@ describe('ApplicationsService', () => {
         id: 'application-id',
       }),
     );
+  });
+
+  it('should find an application only for its holder', async () => {
+    mockPrismaService.application.findFirst.mockResolvedValue({
+      id: 'application-id',
+      holderId: 'holder-id',
+    });
+
+    const result = await service.findOneForHolder(
+      'application-id',
+      'holder-id',
+    );
+
+    expect(mockPrismaService.application.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: 'application-id',
+        holderId: 'holder-id',
+      },
+      include: {
+        job: {
+          include: {
+            bank: true,
+          },
+        },
+        holder: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            role: true,
+          },
+        },
+      },
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        id: 'application-id',
+      }),
+    );
+  });
+
+  it('should reject holder access to another holders application', async () => {
+    mockPrismaService.application.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.findOneForHolder('application-id', 'different-holder-id'),
+    ).rejects.toThrow('Application not found');
+  });
+
+  it('should find an application only for the owning bank', async () => {
+    mockPrismaService.application.findFirst.mockResolvedValue({
+      id: 'application-id',
+      holderId: 'holder-id',
+      job: {
+        bankId: 'bank-id',
+      },
+    });
+
+    const result = await service.findOneForBank('application-id', 'bank-id');
+
+    expect(mockPrismaService.application.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: 'application-id',
+        job: {
+          is: {
+            bankId: 'bank-id',
+          },
+        },
+      },
+      include: {
+        job: {
+          include: {
+            bank: true,
+          },
+        },
+        holder: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            role: true,
+          },
+        },
+      },
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        id: 'application-id',
+      }),
+    );
+  });
+
+  it('should reject bank access to another banks application', async () => {
+    mockPrismaService.application.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.findOneForBank('application-id', 'different-bank-id'),
+    ).rejects.toThrow('Application not found');
   });
 });

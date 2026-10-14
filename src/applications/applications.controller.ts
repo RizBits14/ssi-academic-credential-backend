@@ -1,7 +1,6 @@
 import {
   Body,
   Controller,
-  ForbiddenException,
   Get,
   NotFoundException,
   Param,
@@ -72,35 +71,24 @@ export class ApplicationsController {
     @Req() request: AuthenticatedRequest,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
-    const application = await this.applicationsService.findOne(id);
-
     if (request.user.role === UserRole.HOLDER) {
-      if (application.holderId !== request.user.sub) {
-        throw new ForbiddenException('You cannot access this application');
-      }
-
-      return application;
+      return this.applicationsService.findOneForHolder(id, request.user.sub);
     }
 
-    if (request.user.role === UserRole.VERIFIER_ADMIN) {
-      const bankId = await this.getBankId(request.user.sub);
+    const bankId = await this.getBankId(request.user.sub);
 
-      if (application.job.bankId !== bankId) {
-        throw new ForbiddenException('You cannot access this application');
-      }
-
-      return application;
-    }
-
-    throw new ForbiddenException('You cannot access this application');
+    return this.applicationsService.findOneForBank(id, bankId);
   }
 
   private async getBankId(userId: string): Promise<string> {
     const membership =
-      await this.organizationsService.findMembershipForUser(userId);
+      await this.organizationsService.findActiveMembershipForUser(
+        userId,
+        OrganizationType.BANK,
+      );
 
-    if (!membership || membership.organization.type !== OrganizationType.BANK) {
-      throw new NotFoundException('Bank membership not found');
+    if (!membership) {
+      throw new NotFoundException('Active bank membership not found');
     }
 
     return membership.organization.id;

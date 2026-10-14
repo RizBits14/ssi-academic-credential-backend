@@ -1,13 +1,17 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 
-import { OrganizationType } from '../generated/prisma/enums';
-import { PrismaService } from '../prisma/prisma.service';
-import type { Prisma } from '../generated/prisma/client';
 import { createPaginationMeta } from '../common/utils/pagination.util';
+import type { Prisma } from '../generated/prisma/client';
+import {
+  OrganizationStatus,
+  OrganizationType,
+} from '../generated/prisma/enums';
+import { PrismaService } from '../prisma/prisma.service';
 
 interface CreateJobInput {
   bankId: string;
@@ -39,6 +43,10 @@ export class JobsService {
 
     if (bank.type !== OrganizationType.BANK) {
       throw new BadRequestException('Only bank organizations can own jobs');
+    }
+
+    if (bank.status !== OrganizationStatus.ACTIVE) {
+      throw new ConflictException('Bank organization is not active');
     }
 
     this.validateRequiredClaims(input.requiredClaims);
@@ -85,35 +93,15 @@ export class JobsService {
     return job;
   }
 
-  private validateRequiredClaims(requiredClaims: string[]) {
-    if (!Array.isArray(requiredClaims) || requiredClaims.length === 0) {
-      throw new BadRequestException('At least one required claim is required');
-    }
-
-    const normalized = requiredClaims.map((claim) => claim.trim());
-
-    if (normalized.some((claim) => claim.length === 0)) {
-      throw new BadRequestException(
-        'Required claims cannot contain empty values',
-      );
-    }
-
-    if (new Set(normalized).size !== normalized.length) {
-      throw new BadRequestException(
-        'Required claims cannot contain duplicates',
-      );
-    }
-  }
-
   async update(id: string, bankId: string, input: UpdateJobInput) {
-    const job = await this.prisma.job.findFirst({
+    const existingJob = await this.prisma.job.findFirst({
       where: {
         id,
         bankId,
       },
     });
 
-    if (!job) {
+    if (!existingJob) {
       throw new NotFoundException('Job not found');
     }
 
@@ -121,19 +109,37 @@ export class JobsService {
       this.validateRequiredClaims(input.requiredClaims);
     }
 
-    return this.prisma.job.update({
+    const result = await this.prisma.job.updateMany({
       where: {
         id,
+        bankId,
       },
       data: {
         title: input.title,
         description: input.description,
         requiredClaims: input.requiredClaims,
       },
+    });
+
+    if (result.count !== 1) {
+      throw new NotFoundException('Job not found');
+    }
+
+    const updatedJob = await this.prisma.job.findFirst({
+      where: {
+        id,
+        bankId,
+      },
       include: {
         bank: true,
       },
     });
+
+    if (!updatedJob) {
+      throw new NotFoundException('Job not found');
+    }
+
+    return updatedJob;
   }
 
   async findAllPaginated(input: {
@@ -157,15 +163,12 @@ export class JobsService {
     const [data, total] = await Promise.all([
       this.prisma.job.findMany({
         where,
-
         include: {
           bank: true,
         },
-
         orderBy: {
           createdAt: 'desc',
         },
-
         skip,
         take: input.limit,
       }),
@@ -179,5 +182,25 @@ export class JobsService {
       data,
       meta: createPaginationMeta(input.page, input.limit, total),
     };
+  }
+
+  private validateRequiredClaims(requiredClaims: string[]) {
+    if (!Array.isArray(requiredClaims) || requiredClaims.length === 0) {
+      throw new BadRequestException('At least one required claim is required');
+    }
+
+    const normalized = requiredClaims.map((claim) => claim.trim());
+
+    if (normalized.some((claim) => claim.length === 0)) {
+      throw new BadRequestException(
+        'Required claims cannot contain empty values',
+      );
+    }
+
+    if (new Set(normalized).size !== normalized.length) {
+      throw new BadRequestException(
+        'Required claims cannot contain duplicates',
+      );
+    }
   }
 }
