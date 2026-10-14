@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
+import { randomUUID } from 'node:crypto';
 
 import { UserRole } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
@@ -154,10 +155,16 @@ export class AuthService {
 
     const accessToken = await this.jwtService.signAsync(payload);
 
-    const refreshToken = await this.jwtService.signAsync(payload, {
-      secret: this.configService.getOrThrow<string>('JWT_REFRESH_SECRET'),
-      expiresIn: '7d',
-    });
+    const refreshToken = await this.jwtService.signAsync(
+      {
+        ...payload,
+        jti: randomUUID(),
+      },
+      {
+        secret: this.configService.getOrThrow<string>('JWT_REFRESH_SECRET'),
+        expiresIn: '7d',
+      },
+    );
 
     const refreshTokenExpiresAt = new Date(
       Date.now() + 7 * 24 * 60 * 60 * 1000,
