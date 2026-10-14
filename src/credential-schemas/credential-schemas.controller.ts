@@ -66,13 +66,13 @@ export class CredentialSchemasController {
 
   private async getUniversityId(userId: string): Promise<string> {
     const membership =
-      await this.organizationsService.findMembershipForUser(userId);
+      await this.organizationsService.findActiveMembershipForUser(
+        userId,
+        OrganizationType.UNIVERSITY,
+      );
 
-    if (
-      !membership ||
-      membership.organization.type !== OrganizationType.UNIVERSITY
-    ) {
-      throw new NotFoundException('University membership not found');
+    if (!membership) {
+      throw new NotFoundException('Active university membership not found');
     }
 
     return membership.organization.id;

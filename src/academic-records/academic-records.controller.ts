@@ -83,6 +83,7 @@ export class AcademicRecordsController {
   @Get(':id')
   async findOne(@Req() request: AuthenticatedRequest, @Param('id') id: string) {
     const universityId = await this.getUniversityId(request.user.sub);
+
     const record = await this.academicRecordsService.findById(id);
 
     if (record.universityId !== universityId) {
@@ -100,6 +101,7 @@ export class AcademicRecordsController {
     @Body() dto: UpdateAcademicRecordDto,
   ) {
     const universityId = await this.getUniversityId(request.user.sub);
+
     const record = await this.academicRecordsService.findById(id);
 
     if (record.universityId !== universityId) {
@@ -122,13 +124,13 @@ export class AcademicRecordsController {
 
   private async getUniversityId(userId: string): Promise<string> {
     const membership =
-      await this.organizationsService.findMembershipForUser(userId);
+      await this.organizationsService.findActiveMembershipForUser(
+        userId,
+        OrganizationType.UNIVERSITY,
+      );
 
-    if (
-      !membership ||
-      membership.organization.type !== OrganizationType.UNIVERSITY
-    ) {
-      throw new NotFoundException('University membership not found');
+    if (!membership) {
+      throw new NotFoundException('Active university membership not found');
     }
 
     return membership.organization.id;

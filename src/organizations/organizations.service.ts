@@ -1,4 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { ForbiddenException, Injectable } from '@nestjs/common';
+
+import {
+  OrganizationStatus,
+  OrganizationType,
+} from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
@@ -24,5 +29,34 @@ export class OrganizationsService {
         organization: true,
       },
     });
+  }
+
+  async findActiveMembershipForUser(
+    userId: string,
+    organizationType: OrganizationType,
+  ) {
+    const memberships = await this.prisma.organizationMember.findMany({
+      where: {
+        userId,
+        organization: {
+          is: {
+            type: organizationType,
+            status: OrganizationStatus.ACTIVE,
+          },
+        },
+      },
+      include: {
+        organization: true,
+      },
+      take: 2,
+    });
+
+    if (memberships.length > 1) {
+      throw new ForbiddenException(
+        'Multiple active organization memberships require explicit organization context',
+      );
+    }
+
+    return memberships[0] ?? null;
   }
 }

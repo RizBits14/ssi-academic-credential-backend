@@ -1,4 +1,10 @@
+import { ForbiddenException } from '@nestjs/common';
 import { describe, expect, it, jest } from '@jest/globals';
+
+import {
+  OrganizationStatus,
+  OrganizationType,
+} from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
 import { OrganizationsService } from './organizations.service';
 
@@ -9,6 +15,7 @@ describe('OrganizationsService', () => {
     },
     organizationMember: {
       findFirst: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+      findMany: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
     },
   };
 
@@ -60,5 +67,78 @@ describe('OrganizationsService', () => {
     });
 
     expect(result).toEqual(membership);
+  });
+
+  it('should return one active university membership', async () => {
+    const membership = {
+      id: 'membership-id',
+      userId: 'user-id',
+      organization: {
+        id: 'university-id',
+        name: 'Example University',
+        type: OrganizationType.UNIVERSITY,
+        status: OrganizationStatus.ACTIVE,
+      },
+    };
+
+    mockPrisma.organizationMember.findMany.mockResolvedValue([membership]);
+
+    const result = await organizationsService.findActiveMembershipForUser(
+      'user-id',
+      OrganizationType.UNIVERSITY,
+    );
+
+    expect(mockPrisma.organizationMember.findMany).toHaveBeenCalledWith({
+      where: {
+        userId: 'user-id',
+        organization: {
+          is: {
+            type: OrganizationType.UNIVERSITY,
+            status: OrganizationStatus.ACTIVE,
+          },
+        },
+      },
+      include: {
+        organization: true,
+      },
+      take: 2,
+    });
+
+    expect(result).toEqual(membership);
+  });
+
+  it('should return null when no active membership exists', async () => {
+    mockPrisma.organizationMember.findMany.mockResolvedValue([]);
+
+    const result = await organizationsService.findActiveMembershipForUser(
+      'user-id',
+      OrganizationType.UNIVERSITY,
+    );
+
+    expect(result).toBeNull();
+  });
+
+  it('should reject ambiguous active memberships', async () => {
+    mockPrisma.organizationMember.findMany.mockResolvedValue([
+      {
+        id: 'membership-1',
+        organization: {
+          id: 'university-1',
+        },
+      },
+      {
+        id: 'membership-2',
+        organization: {
+          id: 'university-2',
+        },
+      },
+    ]);
+
+    await expect(
+      organizationsService.findActiveMembershipForUser(
+        'user-id',
+        OrganizationType.UNIVERSITY,
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
   });
 });
