@@ -1,143 +1,130 @@
-import { describe, expect, it, jest } from '@jest/globals';
-import { HashingService } from '../crypto/hashing.service';
+import { beforeEach, describe, expect, it, jest } from '@jest/globals';
+
+import { EncryptionService } from '../crypto/encryption.service';
+// import { HashingService } from '../crypto/hashing.service';
+import { DidService } from '../did/did.service';
 import { CredentialsService } from './credentials.service';
 
 describe('CredentialsService', () => {
-  const hashingService = new HashingService();
-
-  const mockDidService = {
-    signForOrganization: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+  const mockHashingService = {
+    sha256: jest.fn<(...args: unknown[]) => string>(),
   };
 
-  const mockEncryptionService = {
-    encrypt: jest.fn<
-      (...args: unknown[]) => {
-        ciphertext: string;
-        iv: string;
-        authTag: string;
-      }
+  const mockDidService = {
+    signForOrganization: jest.fn<
+      (...args: unknown[]) => Promise<{
+        did: string;
+        keyVersion: number;
+        signature: string;
+      }>
     >(),
   };
 
-  const service = new CredentialsService(
-    hashingService,
-    mockDidService,
-    mockEncryptionService,
-  );
+  const mockEncryptionService = {
+    encrypt: jest.fn<(...args: unknown[]) => unknown>(),
+  };
+
+  let service: CredentialsService;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+
+    service = new CredentialsService(
+      mockHashingService,
+      mockDidService as unknown as DidService,
+      mockEncryptionService as unknown as EncryptionService,
+    );
+  });
 
   it('should build an unsigned academic credential', () => {
+    const issuedAt = new Date('2026-10-19T12:00:00.000Z');
+
     const credential = service.buildUnsignedAcademicCredential({
-      issuerDid: 'did:mock:university:123',
+      issuerDid: 'did:example:university',
       issuerName: 'Example University',
-      holderDid: 'did:mock:holder:456',
-      fullName: 'Sample Applicant',
+      holderDid: 'did:example:holder',
+      fullName: 'Sample Student',
       studentId: '20260001',
       degree: 'Bachelor of Science',
-      department: 'Computer Science and Engineering',
+      department: 'Computer Science',
       major: 'Computer Science',
       cgpa: 3.75,
       graduationYear: 2026,
       schemaName: 'AcademicCredential',
       schemaVersion: '1.0',
-      issuedAt: new Date('2026-09-15T00:00:00.000Z'),
+      issuedAt,
     });
 
-    expect(credential.id).toMatch(/^urn:uuid:/);
-
-    expect(credential.type).toEqual([
-      'VerifiableCredential',
-      'AcademicCredential',
-    ]);
-
-    expect(credential.issuer).toEqual({
-      id: 'did:mock:university:123',
-      name: 'Example University',
-    });
-
-    expect(credential.credentialSubject).toEqual(
-      expect.objectContaining({
-        id: 'did:mock:holder:456',
+    expect(credential).toEqual({
+      '@context': ['https://www.w3.org/ns/credentials/v2'],
+      id: expect.stringMatching(/^urn:uuid:/),
+      type: ['VerifiableCredential', 'AcademicCredential'],
+      issuer: {
+        id: 'did:example:university',
+        name: 'Example University',
+      },
+      validFrom: issuedAt.toISOString(),
+      credentialSubject: {
+        id: 'did:example:holder',
+        fullName: 'Sample Student',
         studentId: '20260001',
+        degree: 'Bachelor of Science',
+        department: 'Computer Science',
+        major: 'Computer Science',
         cgpa: 3.75,
         graduationYear: 2026,
-      }),
-    );
-
-    expect(credential).not.toHaveProperty('proof');
+      },
+      metadata: {
+        schema: 'AcademicCredential',
+        schemaVersion: '1.0',
+      },
+    });
   });
 
-  it('should canonicalize objects deterministically', () => {
-    const first = {
-      z: 1,
-      a: {
-        y: 2,
-        b: 3,
-      },
-    };
-
-    const second = {
-      a: {
-        b: 3,
-        y: 2,
-      },
-      z: 1,
-    };
-
-    expect(service.canonicalize(first)).toBe(service.canonicalize(second));
-  });
-
-  it('should generate the same hash for equivalent objects', () => {
-    const first = {
-      degree: 'Bachelor of Science',
-      cgpa: 3.75,
-      studentId: '20260001',
-    };
-
-    const second = {
+  it('should omit optional academic fields when they are not provided', () => {
+    const credential = service.buildUnsignedAcademicCredential({
+      issuerDid: 'did:example:university',
+      issuerName: 'Example University',
+      holderDid: 'did:example:holder',
+      fullName: 'Sample Student',
       studentId: '20260001',
       degree: 'Bachelor of Science',
-      cgpa: 3.75,
-    };
-
-    expect(service.hashCredential(first)).toBe(service.hashCredential(second));
-  });
-
-  it('should generate a different hash when credential data changes', () => {
-    const original = {
-      studentId: '20260001',
-      cgpa: 3.75,
-    };
-
-    const modified = {
-      studentId: '20260001',
-      cgpa: 4.0,
-    };
-
-    expect(service.hashCredential(original)).not.toBe(
-      service.hashCredential(modified),
-    );
-  });
-
-  it('should add an issuer proof to the credential', async () => {
-    mockDidService.signForOrganization.mockResolvedValue({
-      did: 'did:mock:university:123',
-      keyVersion: 1,
-      signature: 'base64-signature',
+      major: 'Computer Science',
+      graduationYear: 2026,
+      schemaName: 'AcademicCredential',
+      schemaVersion: '1.0',
+      issuedAt: new Date('2026-10-19T12:00:00.000Z'),
     });
 
+    expect(credential.credentialSubject).not.toHaveProperty('department');
+    expect(credential.credentialSubject).not.toHaveProperty('cgpa');
+  });
+
+  it('should add an issuer proof using the organization DID key', async () => {
+    const createdAt = new Date('2026-10-19T12:00:00.000Z');
+
     const unsignedCredential = {
-      id: 'urn:uuid:test',
-      type: ['VerifiableCredential', 'AcademicCredential'],
+      '@context': ['https://www.w3.org/ns/credentials/v2'],
+      id: 'urn:uuid:credential-id',
+      issuer: {
+        id: 'did:example:university',
+      },
       credentialSubject: {
-        studentId: '20260001',
-        cgpa: 3.75,
+        id: 'did:example:holder',
+        degree: 'Bachelor of Science',
       },
     };
+
+    mockDidService.signForOrganization.mockResolvedValue({
+      did: 'did:example:university',
+      keyVersion: 2,
+      signature: 'issuer-signature',
+    });
 
     const result = await service.addIssuerProof(
       'university-id',
       unsignedCredential,
-      new Date('2026-09-15T00:00:00.000Z'),
+      createdAt,
     );
 
     expect(mockDidService.signForOrganization).toHaveBeenCalledWith(
@@ -145,33 +132,33 @@ describe('CredentialsService', () => {
       service.canonicalize(unsignedCredential),
     );
 
-    expect(result.proof).toEqual({
-      type: 'Ed25519Signature',
-      created: '2026-09-15T00:00:00.000Z',
-      verificationMethod: 'did:mock:university:123#key-1',
-      proofValue: 'base64-signature',
+    expect(result).toEqual({
+      ...unsignedCredential,
+      proof: {
+        type: 'Ed25519Signature',
+        created: createdAt.toISOString(),
+        verificationMethod: 'did:example:university#key-2',
+        proofValue: 'issuer-signature',
+      },
     });
   });
 
-  it('should encrypt the signed credential for wallet storage', () => {
+  it('should encrypt a signed credential for wallet storage', () => {
     const signedCredential = {
-      id: 'urn:uuid:test',
-      type: ['VerifiableCredential', 'AcademicCredential'],
-      credentialSubject: {
-        studentId: '20260001',
-        cgpa: 3.75,
-      },
+      id: 'urn:uuid:credential-id',
       proof: {
         type: 'Ed25519Signature',
-        proofValue: 'base64-signature',
+        proofValue: 'signature',
       },
     };
 
-    mockEncryptionService.encrypt.mockReturnValue({
-      ciphertext: 'encrypted-credential',
-      iv: 'test-iv',
-      authTag: 'test-auth-tag',
-    });
+    const encrypted = {
+      ciphertext: 'ciphertext',
+      iv: 'iv',
+      authTag: 'auth-tag',
+    };
+
+    mockEncryptionService.encrypt.mockReturnValue(encrypted);
 
     const result = service.encryptCredentialForWallet(signedCredential);
 
@@ -179,10 +166,43 @@ describe('CredentialsService', () => {
       JSON.stringify(signedCredential),
     );
 
-    expect(result).toEqual({
-      ciphertext: 'encrypted-credential',
-      iv: 'test-iv',
-      authTag: 'test-auth-tag',
-    });
+    expect(result).toEqual(encrypted);
+  });
+
+  it('should canonicalize object keys deterministically', () => {
+    const value = {
+      z: 1,
+      a: {
+        d: 4,
+        b: 2,
+      },
+      c: [
+        {
+          y: 2,
+          x: 1,
+        },
+      ],
+    };
+
+    expect(service.canonicalize(value)).toBe(
+      '{"a":{"b":2,"d":4},"c":[{"x":1,"y":2}],"z":1}',
+    );
+  });
+
+  it('should hash the canonical credential representation', () => {
+    const unsignedCredential = {
+      z: 'last',
+      a: 'first',
+    };
+
+    mockHashingService.sha256.mockReturnValue('credential-hash');
+
+    const result = service.hashCredential(unsignedCredential);
+
+    expect(mockHashingService.sha256).toHaveBeenCalledWith(
+      '{"a":"first","z":"last"}',
+    );
+
+    expect(result).toBe('credential-hash');
   });
 });
