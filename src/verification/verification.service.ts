@@ -112,14 +112,26 @@ export class VerificationService {
     }
 
     if (request.expiresAt.getTime() <= Date.now()) {
-      await this.prisma.verificationRequest.update({
-        where: {
-          id: request.id,
+      const expiryTransition = await this.prisma.verificationRequest.updateMany(
+        {
+          where: {
+            id: request.id,
+            status: VerificationRequestStatus.APPROVED,
+            expiresAt: {
+              lte: new Date(),
+            },
+          },
+          data: {
+            status: VerificationRequestStatus.EXPIRED,
+          },
         },
-        data: {
-          status: VerificationRequestStatus.EXPIRED,
-        },
-      });
+      );
+
+      if (expiryTransition.count !== 1) {
+        throw new ConflictException(
+          'Verification request is no longer approved',
+        );
+      }
 
       await this.redis.delete(`verification-request:${request.id}`);
 
@@ -540,63 +552,79 @@ export class VerificationService {
       }
 
       const reason = this.getVerificationFailureReason(error);
-
       const failedChecks = this.buildFailedVerificationChecks(reason);
 
       const failedResult = await this.prisma.$transaction(
         async (transaction) => {
+          const requestTransition =
+            await transaction.verificationRequest.updateMany({
+              where: {
+                id: requestContext.request.id,
+                status: VerificationRequestStatus.APPROVED,
+                application: {
+                  is: {
+                    job: {
+                      is: {
+                        bankId,
+                      },
+                    },
+                  },
+                },
+              },
+              data: {
+                status: VerificationRequestStatus.FAILED,
+              },
+            });
+
+          if (requestTransition.count !== 1) {
+            throw new ConflictException(
+              'Verification request is no longer approved',
+            );
+          }
+
+          const applicationTransition =
+            await transaction.application.updateMany({
+              where: {
+                id: requestContext.request.applicationId,
+                educationVerificationStatus:
+                  EducationVerificationStatus.PENDING,
+                job: {
+                  is: {
+                    bankId,
+                  },
+                },
+              },
+              data: {
+                educationVerificationStatus: EducationVerificationStatus.FAILED,
+                verifiedAcademicData: Prisma.DbNull,
+              },
+            });
+
+          if (applicationTransition.count !== 1) {
+            throw new ConflictException(
+              'Application verification state has changed',
+            );
+          }
+
           const verificationResult =
             await transaction.verificationResult.create({
               data: {
                 presentationId: requestContext.presentation.id,
-
                 applicationId: requestContext.request.applicationId,
-
                 requestValid: failedChecks.requestValid,
-
                 nonceValid: failedChecks.nonceValid,
-
                 holderProofValid: failedChecks.holderProofValid,
-
                 hashValid: failedChecks.hashValid,
-
                 issuerSignatureValid: failedChecks.issuerSignatureValid,
-
                 issuerTrusted: failedChecks.issuerTrusted,
-
                 credentialStatusValid: failedChecks.credentialStatusValid,
-
                 schemaValid: failedChecks.schemaValid,
-
                 holderMatches: failedChecks.holderMatches,
-
                 claimsValid: failedChecks.claimsValid,
-
                 finalResult: VerificationFinalResult.FAILED,
-
                 failureReason: reason,
               },
             });
-
-          await transaction.verificationRequest.update({
-            where: {
-              id: requestContext.request.id,
-            },
-            data: {
-              status: VerificationRequestStatus.FAILED,
-            },
-          });
-
-          await transaction.application.update({
-            where: {
-              id: requestContext.request.applicationId,
-            },
-            data: {
-              educationVerificationStatus: EducationVerificationStatus.FAILED,
-
-              verifiedAcademicData: Prisma.DbNull,
-            },
-          });
 
           await transaction.auditLog.create({
             data: {
@@ -605,14 +633,10 @@ export class VerificationService {
               action: 'VERIFICATION_FAILED',
               resourceType: 'Presentation',
               resourceId: requestContext.presentation.id,
-
               metadata: {
                 verificationResultId: verificationResult.id,
-
                 applicationId: requestContext.request.applicationId,
-
                 verificationRequestId: requestContext.request.id,
-
                 reason,
               },
             },
@@ -628,33 +652,20 @@ export class VerificationService {
 
       throw new UnprocessableEntityException({
         verified: false,
-
         verificationResultId: failedResult.id,
-
         checks: {
           requestValid: failedChecks.requestValid,
-
           nonceValid: failedChecks.nonceValid,
-
           holderProofValid: failedChecks.holderProofValid,
-
           credentialHashValid: failedChecks.hashValid,
-
           issuerSignatureValid: failedChecks.issuerSignatureValid,
-
           issuerTrusted: failedChecks.issuerTrusted,
-
           credentialActive: failedChecks.credentialStatusValid,
-
           credentialNotExpired: failedChecks.credentialNotExpired,
-
           schemaValid: failedChecks.schemaValid,
-
           holderMatches: failedChecks.holderMatches,
-
           claimsValid: failedChecks.claimsValid,
         },
-
         reason,
       });
     }
@@ -667,12 +678,58 @@ export class VerificationService {
     );
 
     const result = await this.prisma.$transaction(async (transaction) => {
+      const requestTransition =
+        await transaction.verificationRequest.updateMany({
+          where: {
+            id: request.id,
+            status: VerificationRequestStatus.APPROVED,
+            application: {
+              is: {
+                job: {
+                  is: {
+                    bankId,
+                  },
+                },
+              },
+            },
+          },
+          data: {
+            status: VerificationRequestStatus.VERIFIED,
+          },
+        });
+
+      if (requestTransition.count !== 1) {
+        throw new ConflictException(
+          'Verification request is no longer approved',
+        );
+      }
+
+      const applicationTransition = await transaction.application.updateMany({
+        where: {
+          id: request.applicationId,
+          educationVerificationStatus: EducationVerificationStatus.PENDING,
+          job: {
+            is: {
+              bankId,
+            },
+          },
+        },
+        data: {
+          educationVerificationStatus: EducationVerificationStatus.VERIFIED,
+          verifiedAcademicData: disclosedClaims as Prisma.InputJsonObject,
+        },
+      });
+
+      if (applicationTransition.count !== 1) {
+        throw new ConflictException(
+          'Application verification state has changed',
+        );
+      }
+
       const verificationResult = await transaction.verificationResult.create({
         data: {
           presentationId: presentation.id,
-
           applicationId: request.applicationId,
-
           requestValid: true,
           nonceValid: true,
           holderProofValid: true,
@@ -683,9 +740,7 @@ export class VerificationService {
           schemaValid: true,
           holderMatches: true,
           claimsValid: true,
-
           finalResult: VerificationFinalResult.VERIFIED,
-
           failureReason: null,
         },
       });
@@ -697,34 +752,11 @@ export class VerificationService {
           action: 'CREDENTIAL_VERIFIED',
           resourceType: 'Presentation',
           resourceId: presentation.id,
-
           metadata: {
             verificationResultId: verificationResult.id,
-
             applicationId: request.applicationId,
-
             verificationRequestId: request.id,
           },
-        },
-      });
-
-      await transaction.application.update({
-        where: {
-          id: request.applicationId,
-        },
-        data: {
-          educationVerificationStatus: EducationVerificationStatus.VERIFIED,
-
-          verifiedAcademicData: disclosedClaims as Prisma.InputJsonObject,
-        },
-      });
-
-      await transaction.verificationRequest.update({
-        where: {
-          id: request.id,
-        },
-        data: {
-          status: VerificationRequestStatus.VERIFIED,
         },
       });
 
@@ -735,9 +767,7 @@ export class VerificationService {
 
     return {
       verified: true,
-
       verificationResultId: result.id,
-
       checks: {
         requestValid: true,
         nonceValid: true,
@@ -751,7 +781,6 @@ export class VerificationService {
         holderMatches: true,
         claimsValid: true,
       },
-
       verifiedClaims: disclosedClaims,
     };
   }

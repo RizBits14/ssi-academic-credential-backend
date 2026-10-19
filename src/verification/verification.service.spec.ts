@@ -1,5 +1,10 @@
 import { createHash } from 'node:crypto';
 
+import {
+  BadRequestException,
+  ConflictException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 import { EncryptionService } from '../crypto/encryption.service';
@@ -7,6 +12,7 @@ import { SignatureService } from '../crypto/signature.service';
 import { DidService } from '../did/did.service';
 import {
   CredentialStatus,
+  EducationVerificationStatus,
   VerificationRequestStatus,
 } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
@@ -249,17 +255,41 @@ describe('VerificationService', () => {
     ).rejects.toThrow('Credential has been revoked');
   });
 
+  const transactionClient = {
+    verificationRequest: {
+      updateMany: jest.fn<(...args: unknown[]) => Promise<{ count: number }>>(),
+    },
+    application: {
+      updateMany: jest.fn<(...args: unknown[]) => Promise<{ count: number }>>(),
+    },
+    verificationResult: {
+      create: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+    },
+    auditLog: {
+      create: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+    },
+  };
+
   const mockPrismaService = {
     presentation: {
       findUnique: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
       findFirst: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
     },
     verificationRequest: {
-      update: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+      findUnique: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+      updateMany: jest.fn<(...args: unknown[]) => Promise<{ count: number }>>(),
+    },
+    verificationResult: {
+      findUnique: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
     },
     walletCredential: {
       findFirst: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
     },
+    $transaction: jest.fn(
+      async (
+        callback: (transaction: typeof transactionClient) => Promise<unknown>,
+      ) => callback(transactionClient),
+    ),
   };
 
   const mockRedisService = {
@@ -347,6 +377,7 @@ describe('VerificationService', () => {
   }
 
   beforeEach(() => {
+    jest.restoreAllMocks();
     jest.clearAllMocks();
   });
 
@@ -424,6 +455,92 @@ describe('VerificationService', () => {
     await expect(
       service.validateRequestContext('presentation-id'),
     ).rejects.toThrow('Verification session bank mismatch');
+  });
+
+  it('should expire only a request that is still approved', async () => {
+    mockValidContext();
+
+    mockPrismaService.presentation.findUnique.mockResolvedValue({
+      id: 'presentation-id',
+      holderId: 'holder-id',
+      nonce,
+      credential: {
+        id: 'credential-id',
+      },
+      request: {
+        id: 'request-id',
+        holderId: 'holder-id',
+        applicationId: 'application-id',
+        nonceHash,
+        status: VerificationRequestStatus.APPROVED,
+        expiresAt: new Date(Date.now() - 60_000),
+        application: {
+          holderId: 'holder-id',
+          job: {
+            bankId: 'bank-id',
+          },
+        },
+      },
+    });
+
+    mockPrismaService.verificationRequest.updateMany.mockResolvedValue({
+      count: 1,
+    });
+    mockRedisService.delete.mockResolvedValue(undefined);
+
+    await expect(
+      service.validateRequestContext('presentation-id'),
+    ).rejects.toThrow('Verification request has expired');
+
+    expect(
+      mockPrismaService.verificationRequest.updateMany,
+    ).toHaveBeenCalledWith({
+      where: {
+        id: 'request-id',
+        status: VerificationRequestStatus.APPROVED,
+        expiresAt: {
+          lte: expect.any(Date),
+        },
+      },
+      data: {
+        status: VerificationRequestStatus.EXPIRED,
+      },
+    });
+  });
+
+  it('should not let a stale expiry overwrite a consumed request', async () => {
+    mockPrismaService.presentation.findUnique.mockResolvedValue({
+      id: 'presentation-id',
+      holderId: 'holder-id',
+      nonce,
+      credential: {
+        id: 'credential-id',
+      },
+      request: {
+        id: 'request-id',
+        holderId: 'holder-id',
+        applicationId: 'application-id',
+        nonceHash,
+        status: VerificationRequestStatus.APPROVED,
+        expiresAt: new Date(Date.now() - 60_000),
+        application: {
+          holderId: 'holder-id',
+          job: {
+            bankId: 'bank-id',
+          },
+        },
+      },
+    });
+
+    mockPrismaService.verificationRequest.updateMany.mockResolvedValue({
+      count: 0,
+    });
+
+    await expect(
+      service.validateRequestContext('presentation-id'),
+    ).rejects.toBeInstanceOf(ConflictException);
+
+    expect(mockRedisService.delete).not.toHaveBeenCalled();
   });
 
   it('should reject a missing presentation', async () => {
@@ -617,5 +734,274 @@ describe('VerificationService', () => {
     await expect(
       service.validateCryptographicChecks('presentation-id'),
     ).rejects.toThrow('Holder proof is invalid');
+  });
+
+  it('should atomically finalize a successful verification', async () => {
+    const requestContext = {
+      presentation: {
+        id: 'presentation-id',
+        disclosedClaims: {
+          degree: 'BSc',
+        },
+      },
+      request: {
+        id: 'request-id',
+        applicationId: 'application-id',
+      },
+    };
+
+    jest
+      .spyOn(service, 'validateRequestContextForBank')
+      .mockResolvedValueOnce(requestContext as never);
+
+    jest.spyOn(service, 'validateCredentialChecks').mockResolvedValueOnce({
+      ...requestContext,
+      checks: {},
+    } as never);
+
+    mockPrismaService.verificationResult.findUnique.mockResolvedValue(null);
+
+    transactionClient.verificationRequest.updateMany.mockResolvedValue({
+      count: 1,
+    });
+    transactionClient.application.updateMany.mockResolvedValue({
+      count: 1,
+    });
+    transactionClient.verificationResult.create.mockResolvedValue({
+      id: 'verification-result-id',
+    });
+    transactionClient.auditLog.create.mockResolvedValue({
+      id: 'audit-id',
+    });
+    mockRedisService.delete.mockResolvedValue(undefined);
+
+    const result = await service.verifyPresentation(
+      'presentation-id',
+      'bank-id',
+      'verifier-id',
+    );
+
+    expect(
+      transactionClient.verificationRequest.updateMany,
+    ).toHaveBeenCalledWith({
+      where: {
+        id: 'request-id',
+        status: VerificationRequestStatus.APPROVED,
+        application: {
+          is: {
+            job: {
+              is: {
+                bankId: 'bank-id',
+              },
+            },
+          },
+        },
+      },
+      data: {
+        status: VerificationRequestStatus.VERIFIED,
+      },
+    });
+
+    expect(transactionClient.application.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'application-id',
+        educationVerificationStatus: EducationVerificationStatus.PENDING,
+        job: {
+          is: {
+            bankId: 'bank-id',
+          },
+        },
+      },
+      data: {
+        educationVerificationStatus: EducationVerificationStatus.VERIFIED,
+        verifiedAcademicData: {
+          degree: 'BSc',
+        },
+      },
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        verified: true,
+        verificationResultId: 'verification-result-id',
+      }),
+    );
+
+    expect(mockRedisService.delete).toHaveBeenCalledWith(
+      'verification-request:request-id',
+    );
+  });
+
+  it('should reject a concurrent verification finalization', async () => {
+    const requestContext = {
+      presentation: {
+        id: 'presentation-id',
+        disclosedClaims: {
+          degree: 'BSc',
+        },
+      },
+      request: {
+        id: 'request-id',
+        applicationId: 'application-id',
+      },
+    };
+
+    jest
+      .spyOn(service, 'validateRequestContextForBank')
+      .mockResolvedValueOnce(requestContext as never);
+
+    jest.spyOn(service, 'validateCredentialChecks').mockResolvedValueOnce({
+      ...requestContext,
+      checks: {},
+    } as never);
+
+    mockPrismaService.verificationResult.findUnique.mockResolvedValue(null);
+    transactionClient.verificationRequest.updateMany.mockResolvedValue({
+      count: 0,
+    });
+
+    await expect(
+      service.verifyPresentation('presentation-id', 'bank-id', 'verifier-id'),
+    ).rejects.toThrow('Verification request is no longer approved');
+
+    expect(transactionClient.application.updateMany).not.toHaveBeenCalled();
+    expect(transactionClient.verificationResult.create).not.toHaveBeenCalled();
+    expect(transactionClient.auditLog.create).not.toHaveBeenCalled();
+    expect(mockRedisService.delete).not.toHaveBeenCalled();
+  });
+
+  it('should reject finalization when the application state changed', async () => {
+    const requestContext = {
+      presentation: {
+        id: 'presentation-id',
+        disclosedClaims: {
+          degree: 'BSc',
+        },
+      },
+      request: {
+        id: 'request-id',
+        applicationId: 'application-id',
+      },
+    };
+
+    jest
+      .spyOn(service, 'validateRequestContextForBank')
+      .mockResolvedValueOnce(requestContext as never);
+
+    jest.spyOn(service, 'validateCredentialChecks').mockResolvedValueOnce({
+      ...requestContext,
+      checks: {},
+    } as never);
+
+    mockPrismaService.verificationResult.findUnique.mockResolvedValue(null);
+    transactionClient.verificationRequest.updateMany.mockResolvedValue({
+      count: 1,
+    });
+    transactionClient.application.updateMany.mockResolvedValue({
+      count: 0,
+    });
+
+    await expect(
+      service.verifyPresentation('presentation-id', 'bank-id', 'verifier-id'),
+    ).rejects.toThrow('Application verification state has changed');
+
+    expect(transactionClient.verificationResult.create).not.toHaveBeenCalled();
+    expect(transactionClient.auditLog.create).not.toHaveBeenCalled();
+    expect(mockRedisService.delete).not.toHaveBeenCalled();
+  });
+
+  it('should atomically persist a failed verification', async () => {
+    const requestContext = {
+      presentation: {
+        id: 'presentation-id',
+      },
+      request: {
+        id: 'request-id',
+        applicationId: 'application-id',
+      },
+    };
+
+    jest
+      .spyOn(service, 'validateRequestContextForBank')
+      .mockResolvedValueOnce(requestContext as never);
+
+    jest
+      .spyOn(service, 'validateCredentialChecks')
+      .mockRejectedValueOnce(
+        new BadRequestException('Credential has been revoked'),
+      );
+
+    mockPrismaService.verificationResult.findUnique.mockResolvedValue(null);
+    mockPrismaService.verificationRequest.findUnique.mockResolvedValue({
+      status: VerificationRequestStatus.APPROVED,
+    });
+
+    transactionClient.verificationRequest.updateMany.mockResolvedValue({
+      count: 1,
+    });
+    transactionClient.application.updateMany.mockResolvedValue({
+      count: 1,
+    });
+    transactionClient.verificationResult.create.mockResolvedValue({
+      id: 'failed-result-id',
+    });
+    transactionClient.auditLog.create.mockResolvedValue({
+      id: 'audit-id',
+    });
+    mockRedisService.delete.mockResolvedValue(undefined);
+
+    await expect(
+      service.verifyPresentation('presentation-id', 'bank-id', 'verifier-id'),
+    ).rejects.toBeInstanceOf(UnprocessableEntityException);
+
+    expect(
+      transactionClient.verificationRequest.updateMany,
+    ).toHaveBeenCalledWith({
+      where: {
+        id: 'request-id',
+        status: VerificationRequestStatus.APPROVED,
+        application: {
+          is: {
+            job: {
+              is: {
+                bankId: 'bank-id',
+              },
+            },
+          },
+        },
+      },
+      data: {
+        status: VerificationRequestStatus.FAILED,
+      },
+    });
+
+    expect(transactionClient.application.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'application-id',
+        educationVerificationStatus: EducationVerificationStatus.PENDING,
+        job: {
+          is: {
+            bankId: 'bank-id',
+          },
+        },
+      },
+      data: {
+        educationVerificationStatus: EducationVerificationStatus.FAILED,
+        verifiedAcademicData: expect.anything(),
+      },
+    });
+
+    expect(transactionClient.verificationResult.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        presentationId: 'presentation-id',
+        applicationId: 'application-id',
+        finalResult: expect.anything(),
+        failureReason: 'Credential has been revoked',
+      }),
+    });
+
+    expect(mockRedisService.delete).toHaveBeenCalledWith(
+      'verification-request:request-id',
+    );
   });
 });
