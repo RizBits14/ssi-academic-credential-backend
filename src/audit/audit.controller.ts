@@ -38,30 +38,20 @@ export class AuditController {
   ) {
     let organizationId: string | undefined;
 
-    if (request.user.role !== UserRole.SYSTEM_ADMIN) {
-      const membership = await this.organizationsService.findMembershipForUser(
+    if (request.user.role === UserRole.ISSUER_ADMIN) {
+      organizationId = await this.getOrganizationId(
         request.user.sub,
+        OrganizationType.UNIVERSITY,
+        'University membership required',
       );
+    }
 
-      if (!membership) {
-        throw new ForbiddenException('Organization membership required');
-      }
-
-      if (
-        request.user.role === UserRole.ISSUER_ADMIN &&
-        membership.organization.type !== OrganizationType.UNIVERSITY
-      ) {
-        throw new ForbiddenException('University membership required');
-      }
-
-      if (
-        request.user.role === UserRole.VERIFIER_ADMIN &&
-        membership.organization.type !== OrganizationType.BANK
-      ) {
-        throw new ForbiddenException('Bank membership required');
-      }
-
-      organizationId = membership.organization.id;
+    if (request.user.role === UserRole.VERIFIER_ADMIN) {
+      organizationId = await this.getOrganizationId(
+        request.user.sub,
+        OrganizationType.BANK,
+        'Bank membership required',
+      );
     }
 
     return this.auditService.findAll({
@@ -70,5 +60,23 @@ export class AuditController {
       action: query.action,
       organizationId,
     });
+  }
+
+  private async getOrganizationId(
+    userId: string,
+    organizationType: OrganizationType,
+    errorMessage: string,
+  ): Promise<string> {
+    const membership =
+      await this.organizationsService.findActiveMembershipForUser(
+        userId,
+        organizationType,
+      );
+
+    if (!membership) {
+      throw new ForbiddenException(errorMessage);
+    }
+
+    return membership.organization.id;
   }
 }
