@@ -22,15 +22,6 @@ export class OrganizationsService {
     });
   }
 
-  async findMembershipForUser(userId: string) {
-    return this.prisma.organizationMember.findFirst({
-      where: { userId },
-      include: {
-        organization: true,
-      },
-    });
-  }
-
   async findActiveMembershipForUser(
     userId: string,
     organizationType: OrganizationType,

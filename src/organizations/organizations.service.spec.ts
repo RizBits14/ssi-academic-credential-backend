@@ -1,5 +1,5 @@
 import { ForbiddenException } from '@nestjs/common';
-import { describe, expect, it, jest } from '@jest/globals';
+import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 import {
   OrganizationStatus,
@@ -13,15 +13,21 @@ describe('OrganizationsService', () => {
     organization: {
       findUnique: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
     },
+
     organizationMember: {
-      findFirst: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
       findMany: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
     },
   };
 
-  const organizationsService = new OrganizationsService(
-    mockPrisma as unknown as PrismaService,
-  );
+  let organizationsService: OrganizationsService;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+
+    organizationsService = new OrganizationsService(
+      mockPrisma as unknown as PrismaService,
+    );
+  });
 
   it('should find an organization by slug', async () => {
     const organization = {
@@ -41,32 +47,6 @@ describe('OrganizationsService', () => {
     });
 
     expect(result).toEqual(organization);
-  });
-
-  it('should find a user organization membership', async () => {
-    const membership = {
-      id: 'membership-id',
-      userId: 'user-id',
-      organization: {
-        id: 'organization-id',
-        name: 'Example University',
-      },
-    };
-
-    mockPrisma.organizationMember.findFirst.mockResolvedValue(membership);
-
-    const result = await organizationsService.findMembershipForUser('user-id');
-
-    expect(mockPrisma.organizationMember.findFirst).toHaveBeenCalledWith({
-      where: {
-        userId: 'user-id',
-      },
-      include: {
-        organization: true,
-      },
-    });
-
-    expect(result).toEqual(membership);
   });
 
   it('should return one active university membership', async () => {
