@@ -191,7 +191,7 @@ model Did {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@index([ownerType, ownerId])
+  @@unique([ownerType, ownerId])
   @@index([status])
 }
 
