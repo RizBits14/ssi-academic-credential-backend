@@ -15,11 +15,11 @@ describe('VerificationRequestsService', () => {
     verificationRequest: {
       create: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 
-      update: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+      updateMany: jest.fn<(...args: unknown[]) => Promise<{ count: number }>>(),
     },
 
     application: {
-      update: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+      updateMany: jest.fn<(...args: unknown[]) => Promise<{ count: number }>>(),
     },
 
     presentation: {
@@ -33,13 +33,15 @@ describe('VerificationRequestsService', () => {
 
   const mockPrismaService = {
     application: {
-      findUnique: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+      findFirst: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
     },
 
     verificationRequest: {
       findUnique: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 
-      update: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+      findFirst: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+
+      updateMany: jest.fn<(...args: unknown[]) => Promise<{ count: number }>>(),
     },
 
     walletCredential: {
@@ -88,7 +90,7 @@ describe('VerificationRequestsService', () => {
     );
   });
 
-  it('should return a verification request by id', async () => {
+  it('should keep global request lookup available for internal workflows', async () => {
     mockPrismaService.verificationRequest.findUnique.mockResolvedValue({
       id: 'request-id',
       holderId: 'holder-id',
@@ -109,8 +111,102 @@ describe('VerificationRequestsService', () => {
     );
   });
 
-  it('should create a request, update application and write audit log', async () => {
-    mockPrismaService.application.findUnique.mockResolvedValue({
+  it('should find a verification request only for its holder', async () => {
+    mockPrismaService.verificationRequest.findFirst.mockResolvedValue({
+      id: 'request-id',
+      holderId: 'holder-id',
+    });
+
+    const result = await service.findOneForHolder('request-id', 'holder-id');
+
+    expect(
+      mockPrismaService.verificationRequest.findFirst,
+    ).toHaveBeenCalledWith({
+      where: {
+        id: 'request-id',
+        holderId: 'holder-id',
+      },
+      include: {
+        application: {
+          include: {
+            job: {
+              include: {
+                bank: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        id: 'request-id',
+      }),
+    );
+  });
+
+  it('should reject holder access to another holders verification request', async () => {
+    mockPrismaService.verificationRequest.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.findOneForHolder('request-id', 'different-holder-id'),
+    ).rejects.toThrow('Verification request not found');
+  });
+
+  it('should find a verification request only for the owning bank', async () => {
+    mockPrismaService.verificationRequest.findFirst.mockResolvedValue({
+      id: 'request-id',
+      holderId: 'holder-id',
+    });
+
+    const result = await service.findOneForBank('request-id', 'bank-id');
+
+    expect(
+      mockPrismaService.verificationRequest.findFirst,
+    ).toHaveBeenCalledWith({
+      where: {
+        id: 'request-id',
+        application: {
+          is: {
+            job: {
+              is: {
+                bankId: 'bank-id',
+              },
+            },
+          },
+        },
+      },
+      include: {
+        application: {
+          include: {
+            job: {
+              include: {
+                bank: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        id: 'request-id',
+      }),
+    );
+  });
+
+  it('should reject bank access to another banks verification request', async () => {
+    mockPrismaService.verificationRequest.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.findOneForBank('request-id', 'different-bank-id'),
+    ).rejects.toThrow('Verification request not found');
+  });
+
+  it('should create a request for an application owned by the bank', async () => {
+    mockPrismaService.application.findFirst.mockResolvedValue({
       id: 'application-id',
       holderId: 'holder-id',
       job: {
@@ -120,8 +216,11 @@ describe('VerificationRequestsService', () => {
     });
 
     mockRedisService.setJson.mockResolvedValue();
-
     mockRedisService.delete.mockResolvedValue();
+
+    transactionClient.application.updateMany.mockResolvedValue({
+      count: 1,
+    });
 
     transactionClient.verificationRequest.create.mockImplementation(
       (...args: unknown[]) => {
@@ -144,8 +243,6 @@ describe('VerificationRequestsService', () => {
       },
     );
 
-    transactionClient.application.update.mockResolvedValue({});
-
     transactionClient.auditLog.create.mockResolvedValue({
       id: 'audit-id',
     });
@@ -155,6 +252,34 @@ describe('VerificationRequestsService', () => {
       verifierId: 'verifier-id',
       bankId: 'bank-id',
       requestedClaims: ['degree', 'cgpa'],
+    });
+
+    expect(mockPrismaService.application.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: 'application-id',
+        job: {
+          is: {
+            bankId: 'bank-id',
+          },
+        },
+      },
+      include: {
+        job: true,
+      },
+    });
+
+    expect(transactionClient.application.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'application-id',
+        job: {
+          is: {
+            bankId: 'bank-id',
+          },
+        },
+      },
+      data: {
+        educationVerificationStatus: EducationVerificationStatus.PENDING,
+      },
     });
 
     expect(result.requestId).toBeDefined();
@@ -170,15 +295,6 @@ describe('VerificationRequestsService', () => {
       }),
       300,
     );
-
-    expect(transactionClient.application.update).toHaveBeenCalledWith({
-      where: {
-        id: 'application-id',
-      },
-      data: {
-        educationVerificationStatus: EducationVerificationStatus.PENDING,
-      },
-    });
 
     expect(transactionClient.auditLog.create).toHaveBeenCalledWith({
       data: {
@@ -196,15 +312,8 @@ describe('VerificationRequestsService', () => {
     });
   });
 
-  it('should reject an application belonging to another bank', async () => {
-    mockPrismaService.application.findUnique.mockResolvedValue({
-      id: 'application-id',
-      holderId: 'holder-id',
-      job: {
-        bankId: 'different-bank',
-        requiredClaims: ['degree'],
-      },
-    });
+  it('should reject an application belonging to another bank without revealing it', async () => {
+    mockPrismaService.application.findFirst.mockResolvedValue(null);
 
     await expect(
       service.create({
@@ -213,11 +322,13 @@ describe('VerificationRequestsService', () => {
         bankId: 'bank-id',
         requestedClaims: ['degree'],
       }),
-    ).rejects.toThrow('Application does not belong to your bank');
+    ).rejects.toThrow('Application not found');
+
+    expect(mockRedisService.setJson).not.toHaveBeenCalled();
   });
 
   it('should reject claims not required by the job', async () => {
-    mockPrismaService.application.findUnique.mockResolvedValue({
+    mockPrismaService.application.findFirst.mockResolvedValue({
       id: 'application-id',
       holderId: 'holder-id',
       job: {
@@ -238,8 +349,8 @@ describe('VerificationRequestsService', () => {
     );
   });
 
-  it('should approve a request and audit approval and presentation creation', async () => {
-    mockPrismaService.verificationRequest.findUnique.mockResolvedValue({
+  it('should approve a request with an atomic pending transition', async () => {
+    mockPrismaService.verificationRequest.findFirst.mockResolvedValue({
       id: 'request-id',
       applicationId: 'application-id',
       holderId: 'holder-id',
@@ -286,6 +397,10 @@ describe('VerificationRequestsService', () => {
       signature: 'signature',
     });
 
+    transactionClient.verificationRequest.updateMany.mockResolvedValue({
+      count: 1,
+    });
+
     transactionClient.presentation.create.mockImplementation(
       (...args: unknown[]) => {
         const [input] = args as [
@@ -302,11 +417,6 @@ describe('VerificationRequestsService', () => {
       },
     );
 
-    transactionClient.verificationRequest.update.mockResolvedValue({
-      id: 'request-id',
-      status: VerificationRequestStatus.APPROVED,
-    });
-
     transactionClient.auditLog.create.mockResolvedValue({
       id: 'audit-id',
     });
@@ -316,6 +426,22 @@ describe('VerificationRequestsService', () => {
       holderId: 'holder-id',
       credentialId: 'credential-id',
       approvedClaims: ['degree', 'cgpa'],
+    });
+
+    expect(
+      transactionClient.verificationRequest.updateMany,
+    ).toHaveBeenCalledWith({
+      where: {
+        id: 'request-id',
+        holderId: 'holder-id',
+        status: VerificationRequestStatus.PENDING,
+        expiresAt: {
+          gt: expect.any(Date),
+        },
+      },
+      data: {
+        status: VerificationRequestStatus.APPROVED,
+      },
     });
 
     expect(result.presentationId).toBeDefined();
@@ -352,8 +478,8 @@ describe('VerificationRequestsService', () => {
     });
   });
 
-  it('should reject a request and create an audit log', async () => {
-    mockPrismaService.verificationRequest.findUnique.mockResolvedValue({
+  it('should reject a request with an atomic pending transition', async () => {
+    mockPrismaService.verificationRequest.findFirst.mockResolvedValue({
       id: 'request-id',
       applicationId: 'application-id',
       holderId: 'holder-id',
@@ -369,9 +495,8 @@ describe('VerificationRequestsService', () => {
       requestedClaims: ['degree'],
     });
 
-    transactionClient.verificationRequest.update.mockResolvedValue({
-      id: 'request-id',
-      status: VerificationRequestStatus.REJECTED,
+    transactionClient.verificationRequest.updateMany.mockResolvedValue({
+      count: 1,
     });
 
     transactionClient.auditLog.create.mockResolvedValue({
@@ -381,6 +506,22 @@ describe('VerificationRequestsService', () => {
     mockRedisService.delete.mockResolvedValue();
 
     const result = await service.reject('request-id', 'holder-id');
+
+    expect(
+      transactionClient.verificationRequest.updateMany,
+    ).toHaveBeenCalledWith({
+      where: {
+        id: 'request-id',
+        holderId: 'holder-id',
+        status: VerificationRequestStatus.PENDING,
+        expiresAt: {
+          gt: expect.any(Date),
+        },
+      },
+      data: {
+        status: VerificationRequestStatus.REJECTED,
+      },
+    });
 
     expect(result).toEqual({
       requestId: 'request-id',
@@ -397,6 +538,76 @@ describe('VerificationRequestsService', () => {
         metadata: {
           applicationId: 'application-id',
         },
+      },
+    });
+
+    expect(mockRedisService.delete).toHaveBeenCalledWith(
+      'verification-request:request-id',
+    );
+  });
+
+  it('should reject a concurrent state transition when another request already changed the status', async () => {
+    mockPrismaService.verificationRequest.findFirst.mockResolvedValue({
+      id: 'request-id',
+      applicationId: 'application-id',
+      holderId: 'holder-id',
+      status: VerificationRequestStatus.PENDING,
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+
+    mockRedisService.getJson.mockResolvedValue({
+      applicationId: 'application-id',
+      holderId: 'holder-id',
+      bankId: 'bank-id',
+      nonce: 'nonce',
+      requestedClaims: ['degree'],
+    });
+
+    transactionClient.verificationRequest.updateMany.mockResolvedValue({
+      count: 0,
+    });
+
+    await expect(service.reject('request-id', 'holder-id')).rejects.toThrow(
+      'Verification request is no longer pending or has expired',
+    );
+
+    expect(transactionClient.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it('should expire only a request that is still pending', async () => {
+    mockPrismaService.verificationRequest.findFirst.mockResolvedValue({
+      id: 'request-id',
+      applicationId: 'application-id',
+      holderId: 'holder-id',
+      requestedClaims: ['degree'],
+      status: VerificationRequestStatus.PENDING,
+      expiresAt: new Date(Date.now() - 60_000),
+    });
+
+    mockPrismaService.verificationRequest.updateMany.mockResolvedValue({
+      count: 1,
+    });
+
+    mockRedisService.delete.mockResolvedValue();
+
+    await expect(
+      service.approve({
+        requestId: 'request-id',
+        holderId: 'holder-id',
+        credentialId: 'credential-id',
+        approvedClaims: ['degree'],
+      }),
+    ).rejects.toThrow('Verification request has expired');
+
+    expect(
+      mockPrismaService.verificationRequest.updateMany,
+    ).toHaveBeenCalledWith({
+      where: {
+        id: 'request-id',
+        status: VerificationRequestStatus.PENDING,
+      },
+      data: {
+        status: VerificationRequestStatus.EXPIRED,
       },
     });
 

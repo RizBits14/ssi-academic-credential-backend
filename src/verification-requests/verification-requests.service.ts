@@ -51,9 +51,14 @@ export class VerificationRequestsService {
   ) {}
 
   async create(input: CreateVerificationRequestInput) {
-    const application = await this.prisma.application.findUnique({
+    const application = await this.prisma.application.findFirst({
       where: {
         id: input.applicationId,
+        job: {
+          is: {
+            bankId: input.bankId,
+          },
+        },
       },
       include: {
         job: true,
@@ -64,17 +69,12 @@ export class VerificationRequestsService {
       throw new NotFoundException('Application not found');
     }
 
-    if (application.job.bankId !== input.bankId) {
-      throw new ForbiddenException('Application does not belong to your bank');
-    }
-
     this.validateRequestedClaims(
       input.requestedClaims,
       application.job.requiredClaims,
     );
 
     const requestId = randomUUID();
-
     const nonce = randomBytes(32).toString('hex');
 
     const nonceHash = createHash('sha256').update(nonce).digest('hex');
@@ -97,6 +97,24 @@ export class VerificationRequestsService {
 
     try {
       const request = await this.prisma.$transaction(async (transaction) => {
+        const applicationUpdate = await transaction.application.updateMany({
+          where: {
+            id: input.applicationId,
+            job: {
+              is: {
+                bankId: input.bankId,
+              },
+            },
+          },
+          data: {
+            educationVerificationStatus: EducationVerificationStatus.PENDING,
+          },
+        });
+
+        if (applicationUpdate.count !== 1) {
+          throw new NotFoundException('Application not found');
+        }
+
         const createdRequest = await transaction.verificationRequest.create({
           data: {
             id: requestId,
@@ -107,15 +125,6 @@ export class VerificationRequestsService {
             nonceHash,
             status: VerificationRequestStatus.PENDING,
             expiresAt,
-          },
-        });
-
-        await transaction.application.update({
-          where: {
-            id: input.applicationId,
-          },
-          data: {
-            educationVerificationStatus: EducationVerificationStatus.PENDING,
           },
         });
 
@@ -176,10 +185,22 @@ export class VerificationRequestsService {
     return request;
   }
 
-  async approve(input: ApproveVerificationRequestInput) {
-    const request = await this.prisma.verificationRequest.findUnique({
+  async findOneForHolder(id: string, holderId: string) {
+    const request = await this.prisma.verificationRequest.findFirst({
       where: {
-        id: input.requestId,
+        id,
+        holderId,
+      },
+      include: {
+        application: {
+          include: {
+            job: {
+              include: {
+                bank: true,
+              },
+            },
+          },
+        },
       },
     });
 
@@ -187,10 +208,53 @@ export class VerificationRequestsService {
       throw new NotFoundException('Verification request not found');
     }
 
-    if (request.holderId !== input.holderId) {
-      throw new ForbiddenException(
-        'You cannot approve this verification request',
-      );
+    return request;
+  }
+
+  async findOneForBank(id: string, bankId: string) {
+    const request = await this.prisma.verificationRequest.findFirst({
+      where: {
+        id,
+        application: {
+          is: {
+            job: {
+              is: {
+                bankId,
+              },
+            },
+          },
+        },
+      },
+      include: {
+        application: {
+          include: {
+            job: {
+              include: {
+                bank: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!request) {
+      throw new NotFoundException('Verification request not found');
+    }
+
+    return request;
+  }
+
+  async approve(input: ApproveVerificationRequestInput) {
+    const request = await this.prisma.verificationRequest.findFirst({
+      where: {
+        id: input.requestId,
+        holderId: input.holderId,
+      },
+    });
+
+    if (!request) {
+      throw new NotFoundException('Verification request not found');
     }
 
     await this.ensurePendingAndActive(
@@ -199,9 +263,9 @@ export class VerificationRequestsService {
       request.expiresAt,
     );
 
-    const session = await this.redis.getJson<VerificationSession>(
-      `verification-request:${request.id}`,
-    );
+    const redisKey = `verification-request:${request.id}`;
+
+    const session = await this.redis.getJson<VerificationSession>(redisKey);
 
     if (!session) {
       await this.expireRequest(request.id);
@@ -209,7 +273,10 @@ export class VerificationRequestsService {
       throw new BadRequestException('Verification request has expired');
     }
 
-    if (session.holderId !== input.holderId) {
+    if (
+      session.holderId !== input.holderId ||
+      session.applicationId !== request.applicationId
+    ) {
       throw new ForbiddenException(
         'Verification session does not belong to this holder',
       );
@@ -274,6 +341,26 @@ export class VerificationRequestsService {
     };
 
     const presentation = await this.prisma.$transaction(async (transaction) => {
+      const transition = await transaction.verificationRequest.updateMany({
+        where: {
+          id: request.id,
+          holderId: input.holderId,
+          status: VerificationRequestStatus.PENDING,
+          expiresAt: {
+            gt: new Date(),
+          },
+        },
+        data: {
+          status: VerificationRequestStatus.APPROVED,
+        },
+      });
+
+      if (transition.count !== 1) {
+        throw new ConflictException(
+          'Verification request is no longer pending or has expired',
+        );
+      }
+
       const createdPresentation = await transaction.presentation.create({
         data: {
           id: presentationId,
@@ -285,15 +372,6 @@ export class VerificationRequestsService {
           nonce: session.nonce,
           presentationHash,
           holderProof,
-        },
-      });
-
-      await transaction.verificationRequest.update({
-        where: {
-          id: request.id,
-        },
-        data: {
-          status: VerificationRequestStatus.APPROVED,
         },
       });
 
@@ -340,20 +418,15 @@ export class VerificationRequestsService {
   }
 
   async reject(requestId: string, holderId: string) {
-    const request = await this.prisma.verificationRequest.findUnique({
+    const request = await this.prisma.verificationRequest.findFirst({
       where: {
         id: requestId,
+        holderId,
       },
     });
 
     if (!request) {
       throw new NotFoundException('Verification request not found');
-    }
-
-    if (request.holderId !== holderId) {
-      throw new ForbiddenException(
-        'You cannot reject this verification request',
-      );
     }
 
     await this.ensurePendingAndActive(
@@ -362,9 +435,9 @@ export class VerificationRequestsService {
       request.expiresAt,
     );
 
-    const session = await this.redis.getJson<VerificationSession>(
-      `verification-request:${request.id}`,
-    );
+    const redisKey = `verification-request:${request.id}`;
+
+    const session = await this.redis.getJson<VerificationSession>(redisKey);
 
     if (!session) {
       await this.expireRequest(request.id);
@@ -372,15 +445,35 @@ export class VerificationRequestsService {
       throw new BadRequestException('Verification request has expired');
     }
 
+    if (
+      session.holderId !== holderId ||
+      session.applicationId !== request.applicationId
+    ) {
+      throw new ForbiddenException(
+        'Verification session does not belong to this holder',
+      );
+    }
+
     const updated = await this.prisma.$transaction(async (transaction) => {
-      const updatedRequest = await transaction.verificationRequest.update({
+      const transition = await transaction.verificationRequest.updateMany({
         where: {
           id: request.id,
+          holderId,
+          status: VerificationRequestStatus.PENDING,
+          expiresAt: {
+            gt: new Date(),
+          },
         },
         data: {
           status: VerificationRequestStatus.REJECTED,
         },
       });
+
+      if (transition.count !== 1) {
+        throw new ConflictException(
+          'Verification request is no longer pending or has expired',
+        );
+      }
 
       await transaction.auditLog.create({
         data: {
@@ -395,10 +488,13 @@ export class VerificationRequestsService {
         },
       });
 
-      return updatedRequest;
+      return {
+        id: request.id,
+        status: VerificationRequestStatus.REJECTED,
+      };
     });
 
-    await this.redis.delete(`verification-request:${request.id}`);
+    await this.redis.delete(redisKey);
 
     return {
       requestId: updated.id,
@@ -423,9 +519,10 @@ export class VerificationRequestsService {
   }
 
   private async expireRequest(requestId: string): Promise<void> {
-    await this.prisma.verificationRequest.update({
+    await this.prisma.verificationRequest.updateMany({
       where: {
         id: requestId,
+        status: VerificationRequestStatus.PENDING,
       },
       data: {
         status: VerificationRequestStatus.EXPIRED,
