@@ -10,9 +10,53 @@ import { SignatureService } from '../crypto/signature.service';
 import {
   DidOwnerType,
   DidStatus,
+  OrganizationStatus,
   OrganizationType,
+  UserRole,
 } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
+
+export interface PublicDidRecord {
+  id: string;
+  did: string;
+  ownerType: DidOwnerType;
+  ownerId: string;
+  publicKey: string;
+  algorithm: string;
+  keyVersion: number;
+  status: DidStatus;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface DidSigningResult {
+  did: string;
+  keyVersion: number;
+  signature: string;
+}
+
+interface SigningDidRecord {
+  did: string;
+  encryptedPrivateKey: string;
+  iv: string;
+  authTag: string;
+  algorithm: string;
+  keyVersion: number;
+  status: DidStatus;
+}
+
+const publicDidSelect = {
+  id: true,
+  did: true,
+  ownerType: true,
+  ownerId: true,
+  publicKey: true,
+  algorithm: true,
+  keyVersion: true,
+  status: true,
+  createdAt: true,
+  updatedAt: true,
+} as const;
 
 @Injectable()
 export class DidService {
@@ -22,10 +66,17 @@ export class DidService {
     private readonly signatureService: SignatureService,
   ) {}
 
-  async createForOrganization(organizationId: string) {
+  async createForOrganization(
+    organizationId: string,
+  ): Promise<PublicDidRecord> {
     const organization = await this.prisma.organization.findUnique({
       where: {
         id: organizationId,
+      },
+      select: {
+        id: true,
+        type: true,
+        status: true,
       },
     });
 
@@ -33,7 +84,11 @@ export class DidService {
       throw new NotFoundException('Organization not found');
     }
 
-    const existingDid = await this.findByOwner(
+    if (organization.status !== OrganizationStatus.ACTIVE) {
+      throw new ConflictException('Organization is not active');
+    }
+
+    const existingDid = await this.findPublicByOwner(
       DidOwnerType.ORGANIZATION,
       organizationId,
     );
@@ -48,10 +103,14 @@ export class DidService {
     return this.createDid(DidOwnerType.ORGANIZATION, organizationId, prefix);
   }
 
-  async createForUser(userId: string) {
+  async createForUser(userId: string): Promise<PublicDidRecord> {
     const user = await this.prisma.user.findUnique({
       where: {
         id: userId,
+      },
+      select: {
+        id: true,
+        role: true,
       },
     });
 
@@ -59,7 +118,11 @@ export class DidService {
       throw new NotFoundException('User not found');
     }
 
-    const existingDid = await this.findByOwner(DidOwnerType.USER, userId);
+    if (user.role !== UserRole.HOLDER) {
+      throw new ConflictException('Only holders can have user DIDs');
+    }
+
+    const existingDid = await this.findPublicByOwner(DidOwnerType.USER, userId);
 
     if (existingDid) {
       throw new ConflictException('User already has a DID');
@@ -68,46 +131,74 @@ export class DidService {
     return this.createDid(DidOwnerType.USER, userId, 'holder');
   }
 
-  async findByDid(did: string) {
+  async findPublicByDid(did: string): Promise<PublicDidRecord | null> {
     return this.prisma.did.findUnique({
       where: {
         did,
       },
+      select: publicDidSelect,
     });
   }
 
-  async findByOwner(ownerType: DidOwnerType, ownerId: string) {
+  async findPublicByOwner(
+    ownerType: DidOwnerType,
+    ownerId: string,
+  ): Promise<PublicDidRecord | null> {
     return this.prisma.did.findFirst({
       where: {
         ownerType,
         ownerId,
       },
+      select: publicDidSelect,
     });
   }
 
   async resolveDid(did: string) {
-    const record = await this.findByDid(did);
+    const record = await this.findPublicByDid(did);
 
     if (!record) {
       throw new NotFoundException('DID not found');
     }
 
+    if (record.algorithm !== 'Ed25519') {
+      throw new ConflictException('DID algorithm is not supported');
+    }
+
     return {
       id: record.did,
-      controller: record.ownerId,
-
+      controller: record.did,
       verificationMethod: {
         id: `${record.did}#key-${record.keyVersion}`,
         type: 'Ed25519VerificationKey',
         publicKey: record.publicKey,
       },
-
       status: record.status,
     };
   }
 
-  async signForOrganization(organizationId: string, data: string) {
-    const didRecord = await this.findByOwner(
+  async signForOrganization(
+    organizationId: string,
+    data: string,
+  ): Promise<DidSigningResult> {
+    const organization = await this.prisma.organization.findUnique({
+      where: {
+        id: organizationId,
+      },
+      select: {
+        id: true,
+        status: true,
+      },
+    });
+
+    if (!organization) {
+      throw new NotFoundException('Organization not found');
+    }
+
+    if (organization.status !== OrganizationStatus.ACTIVE) {
+      throw new ConflictException('Organization is not active');
+    }
+
+    const didRecord = await this.findSigningDidByOwner(
       DidOwnerType.ORGANIZATION,
       organizationId,
     );
@@ -116,9 +207,11 @@ export class DidService {
       throw new NotFoundException('Organization DID not found');
     }
 
-    if (didRecord.status !== DidStatus.ACTIVE) {
-      throw new ConflictException('Organization DID is not active');
-    }
+    this.assertDidCanSign(
+      didRecord.status,
+      didRecord.algorithm,
+      'Organization',
+    );
 
     const privateKey = this.encryptionService.decrypt({
       ciphertext: didRecord.encryptedPrivateKey,
@@ -135,16 +228,35 @@ export class DidService {
     };
   }
 
-  async signForUser(userId: string, data: string) {
-    const didRecord = await this.findByOwner(DidOwnerType.USER, userId);
+  async signForUser(userId: string, data: string): Promise<DidSigningResult> {
+    const user = await this.prisma.user.findUnique({
+      where: {
+        id: userId,
+      },
+      select: {
+        id: true,
+        role: true,
+      },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    if (user.role !== UserRole.HOLDER) {
+      throw new ConflictException('Only holders can sign with user DIDs');
+    }
+
+    const didRecord = await this.findSigningDidByOwner(
+      DidOwnerType.USER,
+      userId,
+    );
 
     if (!didRecord) {
       throw new NotFoundException('Holder DID not found');
     }
 
-    if (didRecord.status !== DidStatus.ACTIVE) {
-      throw new ConflictException('Holder DID is not active');
-    }
+    this.assertDidCanSign(didRecord.status, didRecord.algorithm, 'Holder');
 
     const privateKey = this.encryptionService.decrypt({
       ciphertext: didRecord.encryptedPrivateKey,
@@ -159,13 +271,50 @@ export class DidService {
       keyVersion: didRecord.keyVersion,
       signature,
     };
+  }
+
+  private async findSigningDidByOwner(
+    ownerType: DidOwnerType,
+    ownerId: string,
+  ): Promise<SigningDidRecord | null> {
+    return this.prisma.did.findFirst({
+      where: {
+        ownerType,
+        ownerId,
+      },
+      select: {
+        did: true,
+        encryptedPrivateKey: true,
+        iv: true,
+        authTag: true,
+        algorithm: true,
+        keyVersion: true,
+        status: true,
+      },
+    });
+  }
+
+  private assertDidCanSign(
+    status: DidStatus,
+    algorithm: string,
+    ownerLabel: string,
+  ): void {
+    if (status !== DidStatus.ACTIVE) {
+      throw new ConflictException(`${ownerLabel} DID is not active`);
+    }
+
+    if (algorithm !== 'Ed25519') {
+      throw new ConflictException(
+        `${ownerLabel} DID algorithm is not supported`,
+      );
+    }
   }
 
   private async createDid(
     ownerType: DidOwnerType,
     ownerId: string,
     prefix: string,
-  ) {
+  ): Promise<PublicDidRecord> {
     const keyPair = this.signatureService.generateKeyPair();
 
     const encryptedPrivateKey = this.encryptionService.encrypt(
@@ -188,6 +337,7 @@ export class DidService {
           keyVersion: 1,
           status: DidStatus.ACTIVE,
         },
+        select: publicDidSelect,
       });
 
       await transaction.auditLog.create({
@@ -197,17 +347,14 @@ export class DidService {
                 actorId: ownerId,
               }
             : {}),
-
           ...(ownerType === DidOwnerType.ORGANIZATION
             ? {
                 organizationId: ownerId,
               }
             : {}),
-
           action: 'DID_CREATED',
           resourceType: 'DID',
           resourceId: didRecord.id,
-
           metadata: {
             did,
             ownerType,

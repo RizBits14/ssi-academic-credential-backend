@@ -4,7 +4,6 @@ import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import { AcademicRecordsService } from '../academic-records/academic-records.service';
 import { CredentialSchemasService } from '../credential-schemas/credential-schemas.service';
 import { DidService } from '../did/did.service';
-import { CredentialsService } from './credentials.service';
 import {
   CredentialStatus,
   DidOwnerType,
@@ -15,6 +14,7 @@ import {
 import { OrganizationsService } from '../organizations/organizations.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CredentialIssuanceService } from './credential-issuance.service';
+import { CredentialsService } from './credentials.service';
 
 describe('CredentialIssuanceService', () => {
   const mockAcademicRecordsService = {
@@ -32,18 +32,15 @@ describe('CredentialIssuanceService', () => {
   };
 
   const mockDidService = {
-    findByOwner: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+    findPublicByOwner: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
   };
 
   const mockCredentialsService = {
     buildUnsignedAcademicCredential:
       jest.fn<(...args: unknown[]) => Record<string, unknown>>(),
-
     hashCredential: jest.fn<(...args: unknown[]) => string>(),
-
     addIssuerProof:
       jest.fn<(...args: unknown[]) => Promise<Record<string, unknown>>>(),
-
     encryptCredentialForWallet: jest.fn<
       (...args: unknown[]) => {
         ciphertext: string;
@@ -57,15 +54,12 @@ describe('CredentialIssuanceService', () => {
     credential: {
       create: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
     },
-
     walletCredential: {
       create: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
     },
-
     credentialStatusHistory: {
       create: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
     },
-
     auditLog: {
       create: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
     },
@@ -136,7 +130,7 @@ describe('CredentialIssuanceService', () => {
       },
     });
 
-    mockDidService.findByOwner
+    mockDidService.findPublicByOwner
       .mockResolvedValueOnce({
         did: 'did:mock:university:123',
         status: DidStatus.ACTIVE,
@@ -153,16 +147,13 @@ describe('CredentialIssuanceService', () => {
     mockCredentialsService.buildUnsignedAcademicCredential.mockReturnValue(
       unsignedCredential,
     );
-
     mockCredentialsService.hashCredential.mockReturnValue('credential-hash');
-
     mockCredentialsService.addIssuerProof.mockResolvedValue({
       ...unsignedCredential,
       proof: {
         proofValue: 'signature',
       },
     });
-
     mockCredentialsService.encryptCredentialForWallet.mockReturnValue({
       ciphertext: 'encrypted',
       iv: 'iv',
@@ -183,13 +174,13 @@ describe('CredentialIssuanceService', () => {
       mockAcademicRecordsService.findByIdForUniversity,
     ).toHaveBeenCalledWith('record-id', 'university-id');
 
-    expect(mockDidService.findByOwner).toHaveBeenNthCalledWith(
+    expect(mockDidService.findPublicByOwner).toHaveBeenNthCalledWith(
       1,
       DidOwnerType.ORGANIZATION,
       'university-id',
     );
 
-    expect(mockDidService.findByOwner).toHaveBeenNthCalledWith(
+    expect(mockDidService.findPublicByOwner).toHaveBeenNthCalledWith(
       2,
       DidOwnerType.USER,
       'holder-id',
@@ -247,7 +238,6 @@ describe('CredentialIssuanceService', () => {
       credentialHash: 'credential-hash',
       issuedAt: new Date('2026-09-15T00:00:00.000Z'),
       expiresAt: undefined,
-
       signedCredential: {
         id: 'urn:uuid:credential-123',
         proof: {
@@ -257,7 +247,6 @@ describe('CredentialIssuanceService', () => {
           proofValue: 'signature',
         },
       },
-
       encryptedWalletCredential: {
         ciphertext: 'encrypted',
         iv: 'iv',

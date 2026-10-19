@@ -76,11 +76,7 @@ export class CredentialIssuanceService {
       throw new ConflictException('Credential schema is not active');
     }
 
-    if (schema.status !== 'ACTIVE') {
-      throw new ConflictException('Credential schema is not active');
-    }
-
-    const issuerDid = await this.didService.findByOwner(
+    const issuerDid = await this.didService.findPublicByOwner(
       DidOwnerType.ORGANIZATION,
       organization.id,
     );
@@ -93,7 +89,7 @@ export class CredentialIssuanceService {
       throw new ConflictException('University DID is not active');
     }
 
-    const holderDid = await this.didService.findByOwner(
+    const holderDid = await this.didService.findPublicByOwner(
       DidOwnerType.USER,
       academicRecord.holderId,
     );
@@ -261,7 +257,6 @@ export class CredentialIssuanceService {
               gte: new Date(input.issuedFrom),
             }
           : {}),
-
         ...(input.issuedTo
           ? {
               lte: new Date(input.issuedTo),
@@ -275,7 +270,6 @@ export class CredentialIssuanceService {
     const [data, total] = await Promise.all([
       this.prisma.credential.findMany({
         where,
-
         include: {
           holder: {
             select: {
@@ -284,19 +278,15 @@ export class CredentialIssuanceService {
               email: true,
             },
           },
-
           schema: true,
           academicRecord: true,
         },
-
         orderBy: {
           issuedAt: 'desc',
         },
-
         skip,
         take: input.limit,
       }),
-
       this.prisma.credential.count({
         where,
       }),

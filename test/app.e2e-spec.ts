@@ -1,4 +1,5 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { afterAll, beforeAll, describe, expect, it } from '@jest/globals';
 import { Test, TestingModule } from '@nestjs/testing';
 import { createHash, randomUUID } from 'node:crypto';
 import type { Server } from 'node:http';
@@ -377,24 +378,54 @@ describe('SSI Academic Credential API (e2e)', () => {
     holderId = holder.id;
     universityId = university.id;
 
-    let universityDid = await didService.findByOwner(
-      DidOwnerType.ORGANIZATION,
-      universityId,
-    );
+    let universityDid: { id: string; did: string } | null =
+      await prisma.did.findFirst({
+        where: {
+          ownerType: DidOwnerType.ORGANIZATION,
+          ownerId: universityId,
+        },
+        select: {
+          id: true,
+          did: true,
+        },
+      });
 
     if (!universityDid) {
-      universityDid = await didService.createForOrganization(universityId);
-      createdDidIds.push(universityDid.id);
+      const createdUniversityDid =
+        await didService.createForOrganization(universityId);
+
+      universityDid = {
+        id: createdUniversityDid.id,
+        did: createdUniversityDid.did,
+      };
+
+      createdDidIds.push(createdUniversityDid.id);
     }
 
     universityDidId = universityDid.id;
     universityDidValue = universityDid.did;
 
-    let holderDid = await didService.findByOwner(DidOwnerType.USER, holderId);
+    let holderDid: { id: string; did: string } | null =
+      await prisma.did.findFirst({
+        where: {
+          ownerType: DidOwnerType.USER,
+          ownerId: holderId,
+        },
+        select: {
+          id: true,
+          did: true,
+        },
+      });
 
     if (!holderDid) {
-      holderDid = await didService.createForUser(holderId);
-      createdDidIds.push(holderDid.id);
+      const createdHolderDid = await didService.createForUser(holderId);
+
+      holderDid = {
+        id: createdHolderDid.id,
+        did: createdHolderDid.did,
+      };
+
+      createdDidIds.push(createdHolderDid.id);
     }
 
     holderDidId = holderDid.id;

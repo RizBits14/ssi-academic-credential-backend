@@ -15,10 +15,8 @@ describe('TrustRegistryService', () => {
   const transactionClient = {
     trustedIssuer: {
       create: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
-
       update: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
     },
-
     auditLog: {
       create: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
     },
@@ -27,10 +25,9 @@ describe('TrustRegistryService', () => {
   const mockPrismaService = {
     trustedIssuer: {
       findUnique: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
-
       findMany: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+      count: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
     },
-
     $transaction: jest.fn(
       async (
         callback: (transaction: typeof transactionClient) => Promise<unknown>,
@@ -43,7 +40,7 @@ describe('TrustRegistryService', () => {
   };
 
   const mockDidService = {
-    findByDid: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+    findPublicByDid: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
   };
 
   let service: TrustRegistryService;
@@ -64,7 +61,7 @@ describe('TrustRegistryService', () => {
       type: OrganizationType.UNIVERSITY,
     });
 
-    mockDidService.findByDid.mockResolvedValue({
+    mockDidService.findPublicByDid.mockResolvedValue({
       did: 'did:mock:university:123',
       ownerType: DidOwnerType.ORGANIZATION,
       ownerId: 'university-id',
@@ -91,6 +88,10 @@ describe('TrustRegistryService', () => {
       approvedBy: 'admin-id',
     });
 
+    expect(mockDidService.findPublicByDid).toHaveBeenCalledWith(
+      'did:mock:university:123',
+    );
+
     expect(transactionClient.trustedIssuer.create).toHaveBeenCalledWith({
       data: {
         organizationId: 'university-id',
@@ -98,10 +99,8 @@ describe('TrustRegistryService', () => {
         approvedBy: 'admin-id',
         status: TrustedIssuerStatus.TRUSTED,
       },
-
       include: {
         organization: true,
-
         approvedByUser: {
           select: {
             id: true,
@@ -120,7 +119,6 @@ describe('TrustRegistryService', () => {
         action: 'TRUSTED_ISSUER_ADDED',
         resourceType: 'TrustedIssuer',
         resourceId: 'trusted-issuer-id',
-
         metadata: {
           issuerDid: 'did:mock:university:123',
         },
@@ -159,7 +157,7 @@ describe('TrustRegistryService', () => {
       type: OrganizationType.UNIVERSITY,
     });
 
-    mockDidService.findByDid.mockResolvedValue({
+    mockDidService.findPublicByDid.mockResolvedValue({
       did: 'did:mock:university:other',
       ownerType: DidOwnerType.ORGANIZATION,
       ownerId: 'another-university-id',
@@ -200,7 +198,6 @@ describe('TrustRegistryService', () => {
       where: {
         id: 'trusted-issuer-id',
       },
-
       data: {
         status: TrustedIssuerStatus.SUSPENDED,
         suspendedAt: expect.any(Date),
@@ -214,7 +211,6 @@ describe('TrustRegistryService', () => {
         action: 'TRUSTED_ISSUER_SUSPENDED',
         resourceType: 'TrustedIssuer',
         resourceId: 'trusted-issuer-id',
-
         metadata: {
           issuerDid: 'did:mock:university:123',
         },

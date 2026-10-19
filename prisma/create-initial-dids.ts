@@ -54,7 +54,7 @@ async function main() {
       throw new Error('Seeded holder was not found');
     }
 
-    let universityDid = await didService.findByOwner(
+    let universityDid = await didService.findPublicByOwner(
       DidOwnerType.ORGANIZATION,
       university.id,
     );
@@ -63,7 +63,7 @@ async function main() {
       universityDid = await didService.createForOrganization(university.id);
     }
 
-    let bankDid = await didService.findByOwner(
+    let bankDid = await didService.findPublicByOwner(
       DidOwnerType.ORGANIZATION,
       bank.id,
     );
@@ -72,7 +72,10 @@ async function main() {
       bankDid = await didService.createForOrganization(bank.id);
     }
 
-    let holderDid = await didService.findByOwner(DidOwnerType.USER, holder.id);
+    let holderDid = await didService.findPublicByOwner(
+      DidOwnerType.USER,
+      holder.id,
+    );
 
     if (!holderDid) {
       holderDid = await didService.createForUser(holder.id);

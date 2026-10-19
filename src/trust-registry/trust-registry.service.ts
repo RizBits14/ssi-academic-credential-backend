@@ -4,7 +4,9 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 
+import { createPaginationMeta } from '../common/utils/pagination.util';
 import { DidService } from '../did/did.service';
+import type { Prisma } from '../generated/prisma/client';
 import {
   DidOwnerType,
   DidStatus,
@@ -13,8 +15,6 @@ import {
 } from '../generated/prisma/enums';
 import { OrganizationsService } from '../organizations/organizations.service';
 import { PrismaService } from '../prisma/prisma.service';
-import type { Prisma } from '../generated/prisma/client';
-import { createPaginationMeta } from '../common/utils/pagination.util';
 
 interface AddTrustedIssuerInput {
   organizationId: string;
@@ -43,7 +43,7 @@ export class TrustRegistryService {
       throw new ConflictException('Only university issuers can be trusted');
     }
 
-    const didRecord = await this.didService.findByDid(input.issuerDid);
+    const didRecord = await this.didService.findPublicByDid(input.issuerDid);
 
     if (!didRecord) {
       throw new NotFoundException('Issuer DID not found');
@@ -220,10 +220,8 @@ export class TrustRegistryService {
     const [data, total] = await Promise.all([
       this.prisma.trustedIssuer.findMany({
         where,
-
         include: {
           organization: true,
-
           approvedByUser: {
             select: {
               id: true,
@@ -233,15 +231,12 @@ export class TrustRegistryService {
             },
           },
         },
-
         orderBy: {
           createdAt: 'desc',
         },
-
         skip,
         take: input.limit,
       }),
-
       this.prisma.trustedIssuer.count({
         where,
       }),
