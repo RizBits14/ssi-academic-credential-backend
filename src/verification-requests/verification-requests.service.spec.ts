@@ -37,8 +37,6 @@ describe('VerificationRequestsService', () => {
     },
 
     verificationRequest: {
-      findUnique: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
-
       findFirst: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 
       updateMany: jest.fn<(...args: unknown[]) => Promise<{ count: number }>>(),
@@ -87,27 +85,6 @@ describe('VerificationRequestsService', () => {
       mockRedisService as unknown as RedisService,
       mockEncryptionService as unknown as EncryptionService,
       mockDidService as unknown as DidService,
-    );
-  });
-
-  it('should keep global request lookup available for internal workflows', async () => {
-    mockPrismaService.verificationRequest.findUnique.mockResolvedValue({
-      id: 'request-id',
-      holderId: 'holder-id',
-      status: VerificationRequestStatus.PENDING,
-      application: {
-        job: {
-          bankId: 'bank-id',
-        },
-      },
-    });
-
-    const result = await service.findOne('request-id');
-
-    expect(result).toEqual(
-      expect.objectContaining({
-        id: 'request-id',
-      }),
     );
   });
 

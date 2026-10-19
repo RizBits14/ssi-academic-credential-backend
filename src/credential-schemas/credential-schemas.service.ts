@@ -73,20 +73,6 @@ export class CredentialSchemasService {
     });
   }
 
-  async findById(id: string) {
-    const schema = await this.prisma.credentialSchema.findUnique({
-      where: {
-        id,
-      },
-    });
-
-    if (!schema) {
-      throw new NotFoundException('Credential schema not found');
-    }
-
-    return schema;
-  }
-
   async findByIdForOrganization(id: string, organizationId: string) {
     const schema = await this.prisma.credentialSchema.findFirst({
       where: {

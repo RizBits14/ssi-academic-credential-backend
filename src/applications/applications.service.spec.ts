@@ -16,7 +16,6 @@ describe('ApplicationsService', () => {
     application: {
       create: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
       findMany: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
-      findUnique: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
       findFirst: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
       count: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
     },
@@ -100,21 +99,6 @@ describe('ApplicationsService', () => {
     const result = await service.findByHolder('holder-id');
 
     expect(result).toHaveLength(1);
-  });
-
-  it('should keep global application lookup available for internal workflows', async () => {
-    mockPrismaService.application.findUnique.mockResolvedValue({
-      id: 'application-id',
-      holderId: 'holder-id',
-    });
-
-    const result = await service.findOne('application-id');
-
-    expect(result).toEqual(
-      expect.objectContaining({
-        id: 'application-id',
-      }),
-    );
   });
 
   it('should find an application only for its holder', async () => {

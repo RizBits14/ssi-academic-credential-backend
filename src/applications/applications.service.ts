@@ -73,35 +73,6 @@ export class ApplicationsService {
     });
   }
 
-  async findOne(id: string) {
-    const application = await this.prisma.application.findUnique({
-      where: {
-        id,
-      },
-      include: {
-        job: {
-          include: {
-            bank: true,
-          },
-        },
-        holder: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-            role: true,
-          },
-        },
-      },
-    });
-
-    if (!application) {
-      throw new NotFoundException('Application not found');
-    }
-
-    return application;
-  }
-
   async findOneForHolder(id: string, holderId: string) {
     const application = await this.prisma.application.findFirst({
       where: {

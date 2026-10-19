@@ -13,7 +13,6 @@ describe('CredentialSchemasService', () => {
 
     credentialSchema: {
       create: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
-      findUnique: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
       findFirst: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
       findMany: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
       count: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
@@ -107,25 +106,6 @@ describe('CredentialSchemasService', () => {
         'university-id',
       ),
     ).rejects.toBeInstanceOf(NotFoundException);
-  });
-
-  it('should keep global schema lookup available for verification', async () => {
-    const schema = {
-      id: 'schema-id',
-      organizationId: 'university-id',
-    };
-
-    mockPrisma.credentialSchema.findUnique.mockResolvedValue(schema);
-
-    const result = await service.findById('schema-id');
-
-    expect(mockPrisma.credentialSchema.findUnique).toHaveBeenCalledWith({
-      where: {
-        id: 'schema-id',
-      },
-    });
-
-    expect(result).toEqual(schema);
   });
 
   it('should accept claims containing all required fields', () => {

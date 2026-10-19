@@ -160,31 +160,6 @@ export class VerificationRequestsService {
     }
   }
 
-  async findOne(id: string) {
-    const request = await this.prisma.verificationRequest.findUnique({
-      where: {
-        id,
-      },
-      include: {
-        application: {
-          include: {
-            job: {
-              include: {
-                bank: true,
-              },
-            },
-          },
-        },
-      },
-    });
-
-    if (!request) {
-      throw new NotFoundException('Verification request not found');
-    }
-
-    return request;
-  }
-
   async findOneForHolder(id: string, holderId: string) {
     const request = await this.prisma.verificationRequest.findFirst({
       where: {
