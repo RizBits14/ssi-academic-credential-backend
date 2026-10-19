@@ -94,6 +94,7 @@ describe('VerificationService', () => {
         id: 'credential-id',
         issuerOrganizationId: 'university-org-id',
         issuerDid: 'did:mock:university:issuer-id',
+        holderId: 'holder-id',
         holderDid: 'did:mock:holder:holder-id',
         schemaId: 'schema-id',
         credentialHash,
@@ -111,6 +112,9 @@ describe('VerificationService', () => {
         application: {
           id: 'application-id',
           holderId: 'holder-id',
+          job: {
+            bankId: 'bank-id',
+          },
         },
       },
     });
@@ -162,7 +166,7 @@ describe('VerificationService', () => {
 
     mockTrustRegistryService.isTrusted.mockResolvedValue(true);
 
-    mockCredentialSchemasService.findById.mockResolvedValue({
+    mockCredentialSchemasService.findByIdForOrganization.mockResolvedValue({
       id: 'schema-id',
       organizationId: 'university-org-id',
       name: 'AcademicCredential',
@@ -206,6 +210,10 @@ describe('VerificationService', () => {
         university: 'Example University',
       }),
     );
+
+    expect(
+      mockCredentialSchemasService.findByIdForOrganization,
+    ).toHaveBeenCalledWith('schema-id', 'university-org-id');
   });
 
   it('should reject an untrusted credential issuer', async () => {
@@ -244,6 +252,7 @@ describe('VerificationService', () => {
   const mockPrismaService = {
     presentation: {
       findUnique: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+      findFirst: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
     },
     verificationRequest: {
       update: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
@@ -275,7 +284,8 @@ describe('VerificationService', () => {
   };
 
   const mockCredentialSchemasService = {
-    findById: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+    findByIdForOrganization:
+      jest.fn<(...args: unknown[]) => Promise<unknown>>(),
     validateClaims: jest.fn<(...args: unknown[]) => void>(),
   };
 
@@ -320,6 +330,9 @@ describe('VerificationService', () => {
         application: {
           id: 'application-id',
           holderId: 'holder-id',
+          job: {
+            bankId: 'bank-id',
+          },
         },
       },
     });
@@ -347,6 +360,70 @@ describe('VerificationService', () => {
       nonceValid: true,
       holderMatches: true,
     });
+  });
+
+  it('should validate request context only for the owning bank', async () => {
+    mockValidContext();
+
+    mockPrismaService.presentation.findFirst.mockResolvedValue({
+      id: 'presentation-id',
+    });
+
+    const result = await service.validateRequestContextForBank(
+      'presentation-id',
+      'bank-id',
+    );
+
+    expect(mockPrismaService.presentation.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: 'presentation-id',
+        request: {
+          is: {
+            application: {
+              is: {
+                job: {
+                  is: {
+                    bankId: 'bank-id',
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    expect(result.checks.requestValid).toBe(true);
+  });
+
+  it('should hide a presentation belonging to another bank', async () => {
+    mockPrismaService.presentation.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.validateRequestContextForBank(
+        'presentation-id',
+        'different-bank-id',
+      ),
+    ).rejects.toThrow('Presentation not found');
+  });
+
+  it('should reject a verification session with a mismatched bank', async () => {
+    mockValidContext();
+
+    mockRedisService.getJson.mockResolvedValue({
+      applicationId: 'application-id',
+      holderId: 'holder-id',
+      bankId: 'different-bank-id',
+      nonce,
+      requestedClaims: ['degree'],
+    });
+
+    await expect(
+      service.validateRequestContext('presentation-id'),
+    ).rejects.toThrow('Verification session bank mismatch');
   });
 
   it('should reject a missing presentation', async () => {
@@ -381,6 +458,9 @@ describe('VerificationService', () => {
         expiresAt: futureDate,
         application: {
           holderId: 'holder-id',
+          job: {
+            bankId: 'bank-id',
+          },
         },
       },
     });
@@ -466,6 +546,9 @@ describe('VerificationService', () => {
         expiresAt: futureDate,
         application: {
           holderId: 'holder-id',
+          job: {
+            bankId: 'bank-id',
+          },
         },
       },
     });

@@ -45,10 +45,13 @@ export class VerificationController {
 
   private async getBankId(userId: string): Promise<string> {
     const membership =
-      await this.organizationsService.findMembershipForUser(userId);
+      await this.organizationsService.findActiveMembershipForUser(
+        userId,
+        OrganizationType.BANK,
+      );
 
-    if (!membership || membership.organization.type !== OrganizationType.BANK) {
-      throw new NotFoundException('Bank membership not found');
+    if (!membership) {
+      throw new NotFoundException('Active bank membership not found');
     }
 
     return membership.organization.id;

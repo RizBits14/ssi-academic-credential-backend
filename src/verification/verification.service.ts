@@ -1,7 +1,6 @@
 import {
   BadRequestException,
   ConflictException,
-  ForbiddenException,
   Injectable,
   NotFoundException,
   UnprocessableEntityException,
@@ -42,6 +41,36 @@ export class VerificationService {
     private readonly trustRegistryService: TrustRegistryService,
     private readonly credentialSchemasService: CredentialSchemasService,
   ) {}
+
+  async validateRequestContextForBank(presentationId: string, bankId: string) {
+    const ownedPresentation = await this.prisma.presentation.findFirst({
+      where: {
+        id: presentationId,
+        request: {
+          is: {
+            application: {
+              is: {
+                job: {
+                  is: {
+                    bankId,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!ownedPresentation) {
+      throw new NotFoundException('Presentation not found');
+    }
+
+    return this.validateRequestContext(presentationId);
+  }
 
   async validateRequestContext(presentationId: string) {
     const presentation = await this.prisma.presentation.findUnique({
@@ -107,6 +136,10 @@ export class VerificationService {
       );
     }
 
+    if (session.bankId !== request.application.job.bankId) {
+      throw new BadRequestException('Verification session bank mismatch');
+    }
+
     const nonceHash = createHash('sha256')
       .update(presentation.nonce)
       .digest('hex');
@@ -164,6 +197,7 @@ export class VerificationService {
     const holderVerificationMethod = holderProof.verificationMethod;
 
     if (
+      holderProof.algorithm !== 'Ed25519' ||
       typeof holderSignature !== 'string' ||
       typeof holderVerificationMethod !== 'string'
     ) {
@@ -232,6 +266,7 @@ export class VerificationService {
     const issuerVerificationMethod = proof.verificationMethod;
 
     if (
+      proof.type !== 'Ed25519Signature' ||
       typeof proofValue !== 'string' ||
       typeof issuerVerificationMethod !== 'string'
     ) {
@@ -325,15 +360,10 @@ export class VerificationService {
       throw new BadRequestException('Credential has expired');
     }
 
-    const schema = await this.credentialSchemasService.findById(
+    const schema = await this.credentialSchemasService.findByIdForOrganization(
       credential.schemaId,
+      credential.issuerOrganizationId,
     );
-
-    if (schema.organizationId !== credential.issuerOrganizationId) {
-      throw new BadRequestException(
-        'Credential schema does not belong to issuer',
-      );
-    }
 
     if (schema.status !== 'ACTIVE') {
       throw new BadRequestException('Credential schema is not active');
@@ -356,6 +386,7 @@ export class VerificationService {
     }
 
     if (
+      credential.holderId !== presentation.holderId ||
       credentialSubject.id !== presentation.holderDid ||
       credentialSubject.id !== credential.holderDid
     ) {
@@ -466,13 +497,10 @@ export class VerificationService {
     bankId: string,
     actorId: string,
   ) {
-    const requestContext = await this.validateRequestContext(presentationId);
-
-    if (requestContext.request.application.job.bankId !== bankId) {
-      throw new ForbiddenException(
-        'This verification request does not belong to your bank',
-      );
-    }
+    const requestContext = await this.validateRequestContextForBank(
+      presentationId,
+      bankId,
+    );
 
     const existingResult = await this.prisma.verificationResult.findUnique({
       where: {
