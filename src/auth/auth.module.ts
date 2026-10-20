@@ -38,6 +38,6 @@ import { RefreshTokenService } from './refresh-token.service';
     JwtAuthGuard,
     RolesGuard,
   ],
-  exports: [AuthService, JwtModule, JwtAuthGuard, RolesGuard],
+  exports: [AuthService, JwtModule, JwtAuthGuard, RolesGuard, UsersModule],
 })
 export class AuthModule {}
