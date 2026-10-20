@@ -525,6 +525,334 @@ describe('DidService', () => {
     expect(transactionClient.auditLog.create).not.toHaveBeenCalled();
   });
 
+  it('should revoke a retired historical organization key', async () => {
+    mockPrisma.organization.findUnique.mockResolvedValue({
+      id: 'university-id',
+      status: OrganizationStatus.ACTIVE,
+    });
+
+    mockPrisma.did.findUnique.mockResolvedValue({
+      id: 'did-record-id',
+      did: 'did:mock:university:123',
+      ownerType: DidOwnerType.ORGANIZATION,
+      ownerId: 'university-id',
+      currentKeyVersion: 2,
+      status: DidStatus.ACTIVE,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    mockPrisma.didKey.findUnique.mockResolvedValue({
+      id: 'key-1-id',
+      didId: 'did-record-id',
+      version: 1,
+      publicKey: 'PUBLIC_KEY_1',
+      algorithm: 'Ed25519',
+      status: DidKeyStatus.RETIRED,
+      createdAt: new Date(),
+      retiredAt: new Date(),
+      revokedAt: null,
+    });
+
+    transactionClient.didKey.updateMany.mockResolvedValue({
+      count: 1,
+    });
+
+    transactionClient.auditLog.create.mockResolvedValue({
+      id: 'audit-id',
+    });
+
+    const result = await service.revokeHistoricalKeyForOrganization(
+      'university-id',
+      1,
+      'issuer-admin-id',
+      'Key compromise discovered',
+    );
+
+    expect(transactionClient.didKey.updateMany).toHaveBeenCalledWith({
+      where: {
+        didId: 'did-record-id',
+        version: 1,
+        status: DidKeyStatus.RETIRED,
+      },
+      data: {
+        status: DidKeyStatus.REVOKED,
+        revokedAt: expect.any(Date),
+      },
+    });
+
+    expect(transactionClient.auditLog.create).toHaveBeenCalledWith({
+      data: {
+        actorId: 'issuer-admin-id',
+        organizationId: 'university-id',
+        action: 'DID_KEY_REVOKED',
+        resourceType: 'DID',
+        resourceId: 'did-record-id',
+        metadata: {
+          did: 'did:mock:university:123',
+          ownerType: DidOwnerType.ORGANIZATION,
+          ownerId: 'university-id',
+          keyVersion: 1,
+          reason: 'Key compromise discovered',
+        },
+      },
+    });
+
+    expect(result).toEqual({
+      did: 'did:mock:university:123',
+      keyVersion: 1,
+      verificationMethod: 'did:mock:university:123#key-1',
+      status: DidKeyStatus.REVOKED,
+      revokedAt: expect.any(Date),
+    });
+  });
+
+  it('should require recovery instead of directly revoking the current key', async () => {
+    mockPrisma.organization.findUnique.mockResolvedValue({
+      id: 'university-id',
+      status: OrganizationStatus.ACTIVE,
+    });
+
+    mockPrisma.did.findUnique.mockResolvedValue({
+      id: 'did-record-id',
+      did: 'did:mock:university:123',
+      ownerType: DidOwnerType.ORGANIZATION,
+      ownerId: 'university-id',
+      currentKeyVersion: 2,
+      status: DidStatus.ACTIVE,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    await expect(
+      service.revokeHistoricalKeyForOrganization(
+        'university-id',
+        2,
+        'issuer-admin-id',
+      ),
+    ).rejects.toThrow('Current DID key must be recovered instead of revoked');
+
+    expect(mockPrisma.didKey.findUnique).not.toHaveBeenCalled();
+    expect(transactionClient.didKey.updateMany).not.toHaveBeenCalled();
+    expect(transactionClient.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it('should reject re-revoking an already revoked historical key', async () => {
+    mockPrisma.organization.findUnique.mockResolvedValue({
+      id: 'university-id',
+      status: OrganizationStatus.ACTIVE,
+    });
+
+    mockPrisma.did.findUnique.mockResolvedValue({
+      id: 'did-record-id',
+      did: 'did:mock:university:123',
+      ownerType: DidOwnerType.ORGANIZATION,
+      ownerId: 'university-id',
+      currentKeyVersion: 2,
+      status: DidStatus.ACTIVE,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    mockPrisma.didKey.findUnique.mockResolvedValue({
+      id: 'key-1-id',
+      didId: 'did-record-id',
+      version: 1,
+      publicKey: 'PUBLIC_KEY_1',
+      algorithm: 'Ed25519',
+      status: DidKeyStatus.REVOKED,
+      createdAt: new Date(),
+      retiredAt: new Date(),
+      revokedAt: new Date(),
+    });
+
+    await expect(
+      service.revokeHistoricalKeyForOrganization(
+        'university-id',
+        1,
+        'issuer-admin-id',
+      ),
+    ).rejects.toThrow('DID key is already revoked');
+
+    expect(transactionClient.didKey.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('should recover a compromised current organization key atomically', async () => {
+    mockPrisma.organization.findUnique.mockResolvedValue({
+      id: 'university-id',
+      status: OrganizationStatus.ACTIVE,
+    });
+
+    mockPrisma.did.findUnique.mockResolvedValue({
+      id: 'did-record-id',
+      did: 'did:mock:university:123',
+      ownerType: DidOwnerType.ORGANIZATION,
+      ownerId: 'university-id',
+      currentKeyVersion: 2,
+      status: DidStatus.ACTIVE,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    transactionClient.did.updateMany.mockResolvedValue({
+      count: 1,
+    });
+
+    transactionClient.didKey.updateMany.mockResolvedValue({
+      count: 1,
+    });
+
+    transactionClient.didKey.create.mockResolvedValue({
+      id: 'key-3-id',
+      didId: 'did-record-id',
+      version: 3,
+      publicKey: 'PUBLIC_KEY',
+      algorithm: 'Ed25519',
+      status: DidKeyStatus.ACTIVE,
+      createdAt: new Date(),
+      retiredAt: null,
+      revokedAt: null,
+    });
+
+    transactionClient.auditLog.create.mockResolvedValue({
+      id: 'audit-id',
+    });
+
+    const result = await service.recoverForOrganization(
+      'university-id',
+      'issuer-admin-id',
+      'Current signing key was compromised',
+    );
+
+    expect(transactionClient.did.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'did-record-id',
+        status: DidStatus.ACTIVE,
+        currentKeyVersion: 2,
+      },
+      data: {
+        currentKeyVersion: 3,
+      },
+    });
+
+    expect(transactionClient.didKey.updateMany).toHaveBeenCalledWith({
+      where: {
+        didId: 'did-record-id',
+        version: 2,
+        status: DidKeyStatus.ACTIVE,
+      },
+      data: {
+        status: DidKeyStatus.REVOKED,
+        revokedAt: expect.any(Date),
+      },
+    });
+
+    expect(transactionClient.didKey.create).toHaveBeenCalledWith({
+      data: {
+        didId: 'did-record-id',
+        version: 3,
+        publicKey: 'PUBLIC_KEY',
+        encryptedPrivateKey: 'encrypted-private-key',
+        iv: 'test-iv',
+        authTag: 'test-auth-tag',
+        algorithm: 'Ed25519',
+        status: DidKeyStatus.ACTIVE,
+      },
+      select: {
+        id: true,
+        didId: true,
+        version: true,
+        publicKey: true,
+        algorithm: true,
+        status: true,
+        createdAt: true,
+        retiredAt: true,
+        revokedAt: true,
+      },
+    });
+
+    expect(transactionClient.auditLog.create).toHaveBeenCalledWith({
+      data: {
+        actorId: 'issuer-admin-id',
+        organizationId: 'university-id',
+        action: 'DID_KEY_RECOVERED',
+        resourceType: 'DID',
+        resourceId: 'did-record-id',
+        metadata: {
+          did: 'did:mock:university:123',
+          ownerType: DidOwnerType.ORGANIZATION,
+          ownerId: 'university-id',
+          compromisedKeyVersion: 2,
+          newKeyVersion: 3,
+          reason: 'Current signing key was compromised',
+        },
+      },
+    });
+
+    expect(result).toEqual({
+      did: 'did:mock:university:123',
+      keyVersion: 3,
+      verificationMethod: 'did:mock:university:123#key-3',
+      publicKey: 'PUBLIC_KEY',
+    });
+  });
+
+  it('should reject a concurrent stale recovery', async () => {
+    mockPrisma.organization.findUnique.mockResolvedValue({
+      id: 'university-id',
+      status: OrganizationStatus.ACTIVE,
+    });
+
+    mockPrisma.did.findUnique.mockResolvedValue({
+      id: 'did-record-id',
+      did: 'did:mock:university:123',
+      ownerType: DidOwnerType.ORGANIZATION,
+      ownerId: 'university-id',
+      currentKeyVersion: 2,
+      status: DidStatus.ACTIVE,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    transactionClient.did.updateMany.mockResolvedValue({
+      count: 0,
+    });
+
+    await expect(
+      service.recoverForOrganization(
+        'university-id',
+        'issuer-admin-id',
+        'Compromised key',
+      ),
+    ).rejects.toThrow('DID key has already changed');
+
+    expect(transactionClient.didKey.updateMany).not.toHaveBeenCalled();
+    expect(transactionClient.didKey.create).not.toHaveBeenCalled();
+    expect(transactionClient.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it('should reject verification methods when the DID itself is not active', async () => {
+    mockPrisma.did.findUnique.mockResolvedValue({
+      id: 'did-record-id',
+      did: 'did:mock:holder:123',
+      ownerType: DidOwnerType.USER,
+      ownerId: 'holder-id',
+      currentKeyVersion: 1,
+      status: DidStatus.REVOKED,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    await expect(
+      service.resolveVerificationMethod(
+        'did:mock:holder:123',
+        'did:mock:holder:123#key-1',
+      ),
+    ).rejects.toThrow('DID verification method not found');
+
+    expect(mockPrisma.didKey.findUnique).not.toHaveBeenCalled();
+  });
+
   it('should reject resolving an unsupported key algorithm', async () => {
     mockPrisma.did.findUnique.mockResolvedValue({
       id: 'did-record-id',

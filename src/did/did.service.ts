@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -39,6 +40,14 @@ export interface DidKeyRotationResult {
   keyVersion: number;
   verificationMethod: string;
   publicKey: string;
+}
+
+export interface DidKeyRevocationResult {
+  did: string;
+  keyVersion: number;
+  verificationMethod: string;
+  status: DidKeyStatus;
+  revokedAt: Date;
 }
 
 export interface ResolvedDidDocument {
@@ -221,8 +230,8 @@ export class DidService {
   ): Promise<ResolvedDidDocument> {
     const record = await this.findPublicByDid(did);
 
-    if (!record) {
-      throw new NotFoundException('DID not found');
+    if (!record || record.status !== DidStatus.ACTIVE) {
+      throw new NotFoundException('DID verification method not found');
     }
 
     const version = this.parseVerificationMethodVersion(
@@ -245,36 +254,7 @@ export class DidService {
     organizationId: string,
     data: string,
   ): Promise<DidSigningResult> {
-    const organization = await this.prisma.organization.findUnique({
-      where: {
-        id: organizationId,
-      },
-      select: {
-        id: true,
-        status: true,
-      },
-    });
-
-    if (!organization) {
-      throw new NotFoundException('Organization not found');
-    }
-
-    if (organization.status !== OrganizationStatus.ACTIVE) {
-      throw new ConflictException('Organization is not active');
-    }
-
-    const didRecord = await this.findPublicByOwner(
-      DidOwnerType.ORGANIZATION,
-      organizationId,
-    );
-
-    if (!didRecord) {
-      throw new NotFoundException('Organization DID not found');
-    }
-
-    if (didRecord.status !== DidStatus.ACTIVE) {
-      throw new ConflictException('Organization DID is not active');
-    }
+    const didRecord = await this.requireActiveOrganizationDid(organizationId);
 
     const key = await this.findSigningDidKeyByVersion(
       didRecord.id,
@@ -303,33 +283,10 @@ export class DidService {
   }
 
   async signForUser(userId: string, data: string): Promise<DidSigningResult> {
-    const user = await this.prisma.user.findUnique({
-      where: {
-        id: userId,
-      },
-      select: {
-        id: true,
-        role: true,
-      },
-    });
-
-    if (!user) {
-      throw new NotFoundException('User not found');
-    }
-
-    if (user.role !== UserRole.HOLDER) {
-      throw new ConflictException('Only holders can sign with user DIDs');
-    }
-
-    const didRecord = await this.findPublicByOwner(DidOwnerType.USER, userId);
-
-    if (!didRecord) {
-      throw new NotFoundException('Holder DID not found');
-    }
-
-    if (didRecord.status !== DidStatus.ACTIVE) {
-      throw new ConflictException('Holder DID is not active');
-    }
+    const didRecord = await this.requireActiveHolderDid(
+      userId,
+      'Only holders can sign with user DIDs',
+    );
 
     const key = await this.findSigningDidKeyByVersion(
       didRecord.id,
@@ -359,7 +316,102 @@ export class DidService {
 
   async rotateForOrganization(
     organizationId: string,
+    actorId?: string,
   ): Promise<DidKeyRotationResult> {
+    const didRecord = await this.requireActiveOrganizationDid(organizationId);
+
+    return this.rotateKey(
+      didRecord,
+      DidOwnerType.ORGANIZATION,
+      organizationId,
+      actorId,
+    );
+  }
+
+  async rotateForUser(userId: string): Promise<DidKeyRotationResult> {
+    const didRecord = await this.requireActiveHolderDid(
+      userId,
+      'Only holders can rotate user DID keys',
+    );
+
+    return this.rotateKey(didRecord, DidOwnerType.USER, userId, userId);
+  }
+
+  async revokeHistoricalKeyForOrganization(
+    organizationId: string,
+    keyVersion: number,
+    actorId: string,
+    reason?: string,
+  ): Promise<DidKeyRevocationResult> {
+    const didRecord = await this.requireActiveOrganizationDid(organizationId);
+
+    return this.revokeHistoricalKey(
+      didRecord,
+      keyVersion,
+      DidOwnerType.ORGANIZATION,
+      organizationId,
+      actorId,
+      reason,
+    );
+  }
+
+  async revokeHistoricalKeyForUser(
+    userId: string,
+    keyVersion: number,
+    reason?: string,
+  ): Promise<DidKeyRevocationResult> {
+    const didRecord = await this.requireActiveHolderDid(
+      userId,
+      'Only holders can revoke user DID keys',
+    );
+
+    return this.revokeHistoricalKey(
+      didRecord,
+      keyVersion,
+      DidOwnerType.USER,
+      userId,
+      userId,
+      reason,
+    );
+  }
+
+  async recoverForOrganization(
+    organizationId: string,
+    actorId: string,
+    reason?: string,
+  ): Promise<DidKeyRotationResult> {
+    const didRecord = await this.requireActiveOrganizationDid(organizationId);
+
+    return this.recoverCurrentKey(
+      didRecord,
+      DidOwnerType.ORGANIZATION,
+      organizationId,
+      actorId,
+      reason,
+    );
+  }
+
+  async recoverForUser(
+    userId: string,
+    reason?: string,
+  ): Promise<DidKeyRotationResult> {
+    const didRecord = await this.requireActiveHolderDid(
+      userId,
+      'Only holders can recover user DIDs',
+    );
+
+    return this.recoverCurrentKey(
+      didRecord,
+      DidOwnerType.USER,
+      userId,
+      userId,
+      reason,
+    );
+  }
+
+  private async requireActiveOrganizationDid(
+    organizationId: string,
+  ): Promise<PublicDidRecord> {
     const organization = await this.prisma.organization.findUnique({
       where: {
         id: organizationId,
@@ -391,10 +443,13 @@ export class DidService {
       throw new ConflictException('Organization DID is not active');
     }
 
-    return this.rotateKey(didRecord, DidOwnerType.ORGANIZATION, organizationId);
+    return didRecord;
   }
 
-  async rotateForUser(userId: string): Promise<DidKeyRotationResult> {
+  private async requireActiveHolderDid(
+    userId: string,
+    roleErrorMessage: string,
+  ): Promise<PublicDidRecord> {
     const user = await this.prisma.user.findUnique({
       where: {
         id: userId,
@@ -410,7 +465,7 @@ export class DidService {
     }
 
     if (user.role !== UserRole.HOLDER) {
-      throw new ConflictException('Only holders can rotate user DID keys');
+      throw new ConflictException(roleErrorMessage);
     }
 
     const didRecord = await this.findPublicByOwner(DidOwnerType.USER, userId);
@@ -423,7 +478,7 @@ export class DidService {
       throw new ConflictException('Holder DID is not active');
     }
 
-    return this.rotateKey(didRecord, DidOwnerType.USER, userId);
+    return didRecord;
   }
 
   private async findPublicKeyByVersion(
@@ -519,10 +574,31 @@ export class DidService {
     };
   }
 
+  private validateKeyVersion(keyVersion: number): void {
+    if (!Number.isInteger(keyVersion) || keyVersion < 1) {
+      throw new BadRequestException(
+        'DID key version must be a positive integer',
+      );
+    }
+  }
+
+  private auditActorId(
+    ownerType: DidOwnerType,
+    ownerId: string,
+    actorId?: string,
+  ): string | undefined {
+    if (actorId) {
+      return actorId;
+    }
+
+    return ownerType === DidOwnerType.USER ? ownerId : undefined;
+  }
+
   private async rotateKey(
     didRecord: PublicDidRecord,
     ownerType: DidOwnerType,
     ownerId: string,
+    actorId?: string,
   ): Promise<DidKeyRotationResult> {
     const keyPair = this.signatureService.generateKeyPair();
 
@@ -580,11 +656,13 @@ export class DidService {
         select: publicDidKeySelect,
       });
 
+      const auditActorId = this.auditActorId(ownerType, ownerId, actorId);
+
       await transaction.auditLog.create({
         data: {
-          ...(ownerType === DidOwnerType.USER
+          ...(auditActorId
             ? {
-                actorId: ownerId,
+                actorId: auditActorId,
               }
             : {}),
           ...(ownerType === DidOwnerType.ORGANIZATION
@@ -601,6 +679,190 @@ export class DidService {
             ownerId,
             previousKeyVersion: previousVersion,
             newKeyVersion: nextVersion,
+          },
+        },
+      });
+
+      return {
+        did: didRecord.did,
+        keyVersion: newKey.version,
+        verificationMethod: `${didRecord.did}#key-${newKey.version}`,
+        publicKey: newKey.publicKey,
+      };
+    });
+  }
+
+  private async revokeHistoricalKey(
+    didRecord: PublicDidRecord,
+    keyVersion: number,
+    ownerType: DidOwnerType,
+    ownerId: string,
+    actorId: string,
+    reason?: string,
+  ): Promise<DidKeyRevocationResult> {
+    this.validateKeyVersion(keyVersion);
+
+    if (keyVersion === didRecord.currentKeyVersion) {
+      throw new ConflictException(
+        'Current DID key must be recovered instead of revoked',
+      );
+    }
+
+    const key = await this.findPublicKeyByVersion(didRecord.id, keyVersion);
+
+    if (!key) {
+      throw new NotFoundException('DID key not found');
+    }
+
+    if (key.status === DidKeyStatus.REVOKED) {
+      throw new ConflictException('DID key is already revoked');
+    }
+
+    if (key.status !== DidKeyStatus.RETIRED) {
+      throw new ConflictException(
+        'Only a retired historical DID key can be revoked',
+      );
+    }
+
+    const revokedAt = new Date();
+
+    return this.prisma.$transaction(async (transaction) => {
+      const keyTransition = await transaction.didKey.updateMany({
+        where: {
+          didId: didRecord.id,
+          version: keyVersion,
+          status: DidKeyStatus.RETIRED,
+        },
+        data: {
+          status: DidKeyStatus.REVOKED,
+          revokedAt,
+        },
+      });
+
+      if (keyTransition.count !== 1) {
+        throw new ConflictException('DID key status changed; retry request');
+      }
+
+      await transaction.auditLog.create({
+        data: {
+          actorId,
+          ...(ownerType === DidOwnerType.ORGANIZATION
+            ? {
+                organizationId: ownerId,
+              }
+            : {}),
+          action: 'DID_KEY_REVOKED',
+          resourceType: 'DID',
+          resourceId: didRecord.id,
+          metadata: {
+            did: didRecord.did,
+            ownerType,
+            ownerId,
+            keyVersion,
+            ...(reason
+              ? {
+                  reason,
+                }
+              : {}),
+          },
+        },
+      });
+
+      return {
+        did: didRecord.did,
+        keyVersion,
+        verificationMethod: `${didRecord.did}#key-${keyVersion}`,
+        status: DidKeyStatus.REVOKED,
+        revokedAt,
+      };
+    });
+  }
+
+  private async recoverCurrentKey(
+    didRecord: PublicDidRecord,
+    ownerType: DidOwnerType,
+    ownerId: string,
+    actorId: string,
+    reason?: string,
+  ): Promise<DidKeyRotationResult> {
+    const keyPair = this.signatureService.generateKeyPair();
+
+    const encryptedPrivateKey = this.encryptionService.encrypt(
+      keyPair.privateKey,
+    );
+
+    const compromisedVersion = didRecord.currentKeyVersion;
+    const nextVersion = compromisedVersion + 1;
+    const recoveredAt = new Date();
+
+    return this.prisma.$transaction(async (transaction) => {
+      const didTransition = await transaction.did.updateMany({
+        where: {
+          id: didRecord.id,
+          status: DidStatus.ACTIVE,
+          currentKeyVersion: compromisedVersion,
+        },
+        data: {
+          currentKeyVersion: nextVersion,
+        },
+      });
+
+      if (didTransition.count !== 1) {
+        throw new ConflictException('DID key has already changed');
+      }
+
+      const compromisedKeyTransition = await transaction.didKey.updateMany({
+        where: {
+          didId: didRecord.id,
+          version: compromisedVersion,
+          status: DidKeyStatus.ACTIVE,
+        },
+        data: {
+          status: DidKeyStatus.REVOKED,
+          revokedAt: recoveredAt,
+        },
+      });
+
+      if (compromisedKeyTransition.count !== 1) {
+        throw new ConflictException('Current DID key is no longer active');
+      }
+
+      const newKey = await transaction.didKey.create({
+        data: {
+          didId: didRecord.id,
+          version: nextVersion,
+          publicKey: keyPair.publicKey,
+          encryptedPrivateKey: encryptedPrivateKey.ciphertext,
+          iv: encryptedPrivateKey.iv,
+          authTag: encryptedPrivateKey.authTag,
+          algorithm: 'Ed25519',
+          status: DidKeyStatus.ACTIVE,
+        },
+        select: publicDidKeySelect,
+      });
+
+      await transaction.auditLog.create({
+        data: {
+          actorId,
+          ...(ownerType === DidOwnerType.ORGANIZATION
+            ? {
+                organizationId: ownerId,
+              }
+            : {}),
+          action: 'DID_KEY_RECOVERED',
+          resourceType: 'DID',
+          resourceId: didRecord.id,
+          metadata: {
+            did: didRecord.did,
+            ownerType,
+            ownerId,
+            compromisedKeyVersion: compromisedVersion,
+            newKeyVersion: nextVersion,
+            ...(reason
+              ? {
+                  reason,
+                }
+              : {}),
           },
         },
       });
@@ -652,11 +914,13 @@ export class DidService {
         },
       });
 
+      const auditActorId = this.auditActorId(ownerType, ownerId);
+
       await transaction.auditLog.create({
         data: {
-          ...(ownerType === DidOwnerType.USER
+          ...(auditActorId
             ? {
-                actorId: ownerId,
+                actorId: auditActorId,
               }
             : {}),
           ...(ownerType === DidOwnerType.ORGANIZATION
