@@ -216,8 +216,10 @@ export class VerificationService {
       throw new BadRequestException('Holder proof is invalid');
     }
 
-    const holderDidDocument = await this.didService.resolveDid(
+    const holderDidDocument = await this.resolveProofVerificationMethod(
       presentation.holderDid,
+      holderVerificationMethod,
+      'Holder',
     );
 
     if (holderVerificationMethod !== holderDidDocument.verificationMethod.id) {
@@ -304,8 +306,10 @@ export class VerificationService {
       throw new BadRequestException('Credential hash is invalid');
     }
 
-    const issuerDidDocument = await this.didService.resolveDid(
+    const issuerDidDocument = await this.resolveProofVerificationMethod(
       presentation.credential.issuerDid,
+      issuerVerificationMethod,
+      'Issuer',
     );
 
     if (issuerVerificationMethod !== issuerDidDocument.verificationMethod.id) {
@@ -783,6 +787,32 @@ export class VerificationService {
       },
       verifiedClaims: disclosedClaims,
     };
+  }
+
+  private async resolveProofVerificationMethod(
+    did: string,
+    verificationMethod: string,
+    proofOwner: 'Holder' | 'Issuer',
+  ) {
+    try {
+      return await this.didService.resolveVerificationMethod(
+        did,
+        verificationMethod,
+      );
+    } catch (error) {
+      if (
+        error instanceof NotFoundException ||
+        error instanceof ConflictException
+      ) {
+        const ownerLabel = proofOwner.toLowerCase();
+
+        throw new BadRequestException(
+          `${proofOwner} verification method does not match ${ownerLabel} DID`,
+        );
+      }
+
+      throw error;
+    }
   }
 
   private getVerificationFailureReason(

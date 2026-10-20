@@ -87,6 +87,12 @@ enum VerificationFinalResult {
   FAILED
 }
 
+enum DidKeyStatus {
+  ACTIVE
+  RETIRED
+  REVOKED
+}
+
 model User {
   id           String   @id @default(uuid())
   name         String
@@ -176,23 +182,41 @@ model OrganizationMember {
 }
 
 model Did {
-  id                  String       @id @default(uuid())
-  did                 String       @unique
-  ownerType           DidOwnerType
-  ownerId             String
-  publicKey           String
-  encryptedPrivateKey String
-  iv                  String
-  authTag             String
-  algorithm           String       @default("Ed25519")
-  keyVersion          Int          @default(1)
-  status              DidStatus    @default(ACTIVE)
+  id                String       @id @default(uuid())
+  did               String       @unique
+  ownerType         DidOwnerType
+  ownerId           String
+  currentKeyVersion Int          @default(1)
+  status            DidStatus    @default(ACTIVE)
+
+  keys DidKey[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@unique([ownerType, ownerId])
   @@index([status])
+}
+
+model DidKey {
+  id                  String       @id @default(uuid())
+  didId               String
+  version             Int
+  publicKey           String
+  encryptedPrivateKey String
+  iv                  String
+  authTag             String
+  algorithm           String       @default("Ed25519")
+  status              DidKeyStatus @default(ACTIVE)
+  retiredAt           DateTime?
+  revokedAt           DateTime?
+
+  did Did @relation(fields: [didId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([didId, version])
+  @@index([didId, status])
 }
 
 model AcademicRecord {

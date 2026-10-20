@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import {
   BadRequestException,
   ConflictException,
+  NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
@@ -150,7 +151,7 @@ describe('VerificationService', () => {
       }),
     );
 
-    mockDidService.resolveDid
+    mockDidService.resolveVerificationMethod
       .mockResolvedValueOnce({
         id: 'did:mock:holder:holder-id',
         verificationMethod: {
@@ -220,6 +221,18 @@ describe('VerificationService', () => {
     expect(
       mockCredentialSchemasService.findByIdForOrganization,
     ).toHaveBeenCalledWith('schema-id', 'university-org-id');
+
+    expect(mockDidService.resolveVerificationMethod).toHaveBeenNthCalledWith(
+      1,
+      'did:mock:holder:holder-id',
+      'did:mock:holder:holder-id#key-1',
+    );
+
+    expect(mockDidService.resolveVerificationMethod).toHaveBeenNthCalledWith(
+      2,
+      'did:mock:university:issuer-id',
+      'did:mock:university:issuer-id#key-1',
+    );
   });
 
   it('should reject an untrusted credential issuer', async () => {
@@ -306,7 +319,8 @@ describe('VerificationService', () => {
   };
 
   const mockDidService = {
-    resolveDid: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+    resolveVerificationMethod:
+      jest.fn<(...args: unknown[]) => Promise<unknown>>(),
   };
 
   const mockTrustRegistryService = {
@@ -687,7 +701,7 @@ describe('VerificationService', () => {
       }),
     );
 
-    mockDidService.resolveDid
+    mockDidService.resolveVerificationMethod
       .mockResolvedValueOnce({
         id: 'did:mock:holder:holder-id',
         verificationMethod: {
@@ -722,7 +736,7 @@ describe('VerificationService', () => {
   it('should reject an invalid holder proof', async () => {
     mockValidContext();
 
-    mockDidService.resolveDid.mockResolvedValue({
+    mockDidService.resolveVerificationMethod.mockResolvedValue({
       verificationMethod: {
         id: 'did:mock:holder:holder-id#key-1',
         publicKey: 'holder-public-key',
@@ -734,6 +748,18 @@ describe('VerificationService', () => {
     await expect(
       service.validateCryptographicChecks('presentation-id'),
     ).rejects.toThrow('Holder proof is invalid');
+  });
+
+  it('should reject a holder proof that references an unknown or revoked key', async () => {
+    mockValidContext();
+
+    mockDidService.resolveVerificationMethod.mockRejectedValue(
+      new NotFoundException('DID verification method not found'),
+    );
+
+    await expect(
+      service.validateCryptographicChecks('presentation-id'),
+    ).rejects.toThrow('Holder verification method does not match holder DID');
   });
 
   it('should atomically finalize a successful verification', async () => {
