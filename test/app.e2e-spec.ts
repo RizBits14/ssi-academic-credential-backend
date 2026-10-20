@@ -10,6 +10,7 @@ import { DidService } from '../src/did/did.service';
 import type { Prisma } from '../src/generated/prisma/client';
 import {
   CredentialStatus,
+  DidKeyStatus,
   DidOwnerType,
   EducationVerificationStatus,
   TrustedIssuerStatus,
@@ -242,6 +243,24 @@ describe('SSI Academic Credential API (e2e)', () => {
     createdWalletCredentialIds.push(issued.walletCredentialId);
 
     return issued;
+  }
+
+  async function getWalletCredentialDocument(
+    walletCredentialId: string,
+  ): Promise<Record<string, unknown>> {
+    const response = await request(httpServer)
+      .get(`/api/v1/wallet/credentials/${walletCredentialId}`)
+      .set('Authorization', `Bearer ${holderAuth.accessToken}`)
+      .expect(200);
+
+    const walletView = getSuccessData<{
+      walletCredentialId: string;
+      credential: Record<string, unknown>;
+    }>(response);
+
+    expect(walletView.walletCredentialId).toBe(walletCredentialId);
+
+    return walletView.credential;
   }
 
   async function createPresentation(
@@ -677,47 +696,69 @@ describe('SSI Academic Credential API (e2e)', () => {
         });
       }
 
-      await prisma.auditLog.deleteMany({
-        where: {
-          createdAt: {
-            gte: suiteStartedAt,
-          },
-          OR: [
-            {
-              actorId: {
-                in: [issuerAdminId, verifierAdminId, holderId],
-              },
-            },
-            {
-              resourceId: {
-                in: [
-                  academicRecordId,
-                  credentialSchemaId,
-                  jobId,
-                  universityDidId,
-                  holderDidId,
-                  ...createdCredentialIds,
-                  ...createdWalletCredentialIds,
-                  ...createdApplicationIds,
-                  ...createdVerificationRequestIds,
-                  ...createdPresentationIds,
-                ].filter((value) => Boolean(value)),
-              },
-            },
-          ],
-        },
-      });
+      const cleanupUserIds = [issuerAdminId, verifierAdminId, holderId].filter(
+        (value): value is string =>
+          typeof value === 'string' && value.length > 0,
+      );
 
-      await prisma.refreshToken.deleteMany({
-        where: {
-          createdAt: {
-            gte: suiteStartedAt,
+      const cleanupResourceIds = [
+        academicRecordId,
+        credentialSchemaId,
+        jobId,
+        universityDidId,
+        holderDidId,
+        ...createdCredentialIds,
+        ...createdWalletCredentialIds,
+        ...createdApplicationIds,
+        ...createdVerificationRequestIds,
+        ...createdPresentationIds,
+      ].filter(
+        (value): value is string =>
+          typeof value === 'string' && value.length > 0,
+      );
+
+      if (cleanupUserIds.length > 0 || cleanupResourceIds.length > 0) {
+        await prisma.auditLog.deleteMany({
+          where: {
+            createdAt: {
+              gte: suiteStartedAt,
+            },
+            OR: [
+              ...(cleanupUserIds.length > 0
+                ? [
+                    {
+                      actorId: {
+                        in: cleanupUserIds,
+                      },
+                    },
+                  ]
+                : []),
+              ...(cleanupResourceIds.length > 0
+                ? [
+                    {
+                      resourceId: {
+                        in: cleanupResourceIds,
+                      },
+                    },
+                  ]
+                : []),
+            ],
           },
-          userId: {
-            in: [issuerAdminId, verifierAdminId, holderId],
+        });
+      }
+
+      if (cleanupUserIds.length > 0) {
+        await prisma.refreshToken.deleteMany({
+          where: {
+            createdAt: {
+              gte: suiteStartedAt,
+            },
+            userId: {
+              in: cleanupUserIds,
+            },
           },
-        },
-      });
+        });
+      }
     } finally {
       await app.close();
     }
@@ -933,6 +974,204 @@ describe('SSI Academic Credential API (e2e)', () => {
 
     for (const action of requiredAuditActions) {
       expect(auditActions.has(action)).toBe(true);
+    }
+  });
+
+  it('keeps historical issuer credentials verifiable after DID key rotation', async () => {
+    const startingDid = await prisma.did.findUnique({
+      where: {
+        id: universityDidId,
+      },
+      select: {
+        id: true,
+        did: true,
+        currentKeyVersion: true,
+      },
+    });
+
+    if (!startingDid) {
+      throw new Error('University DID fixture is unavailable');
+    }
+
+    const startingKey = await prisma.didKey.findUnique({
+      where: {
+        didId_version: {
+          didId: universityDidId,
+          version: startingDid.currentKeyVersion,
+        },
+      },
+      select: {
+        version: true,
+        status: true,
+        retiredAt: true,
+        revokedAt: true,
+      },
+    });
+
+    if (!startingKey || startingKey.status !== DidKeyStatus.ACTIVE) {
+      throw new Error('University active DID key fixture is unavailable');
+    }
+
+    const oldCredential = await issueCredential();
+
+    const oldCredentialDocument = await getWalletCredentialDocument(
+      oldCredential.walletCredentialId,
+    );
+
+    const oldProof = asRecord(oldCredentialDocument.proof);
+    const oldVerificationMethod = oldProof.verificationMethod;
+
+    expect(oldVerificationMethod).toBe(
+      `${startingDid.did}#key-${startingDid.currentKeyVersion}`,
+    );
+
+    let rotatedVersion: number | null = null;
+
+    try {
+      const rotation = await didService.rotateForOrganization(universityId);
+
+      rotatedVersion = rotation.keyVersion;
+
+      expect(rotation.did).toBe(startingDid.did);
+      expect(rotation.keyVersion).toBe(startingDid.currentKeyVersion + 1);
+      expect(rotation.verificationMethod).toBe(
+        `${startingDid.did}#key-${rotation.keyVersion}`,
+      );
+
+      const [retiredKey, activeKey, didAfterRotation] = await Promise.all([
+        prisma.didKey.findUnique({
+          where: {
+            didId_version: {
+              didId: universityDidId,
+              version: startingDid.currentKeyVersion,
+            },
+          },
+        }),
+        prisma.didKey.findUnique({
+          where: {
+            didId_version: {
+              didId: universityDidId,
+              version: rotation.keyVersion,
+            },
+          },
+        }),
+        prisma.did.findUnique({
+          where: {
+            id: universityDidId,
+          },
+          select: {
+            currentKeyVersion: true,
+          },
+        }),
+      ]);
+
+      expect(retiredKey?.status).toBe(DidKeyStatus.RETIRED);
+      expect(retiredKey?.retiredAt).toBeInstanceOf(Date);
+      expect(activeKey?.status).toBe(DidKeyStatus.ACTIVE);
+      expect(didAfterRotation?.currentKeyVersion).toBe(rotation.keyVersion);
+
+      const historicalMethod = await didService.resolveVerificationMethod(
+        startingDid.did,
+        String(oldVerificationMethod),
+      );
+
+      expect(historicalMethod.verificationMethod.id).toBe(
+        oldVerificationMethod,
+      );
+
+      const oldFlow = await createPresentation(oldCredential.credential.id);
+
+      const oldVerificationResponse = await request(httpServer)
+        .post(
+          `/api/v1/verification/presentations/${oldFlow.presentationId}/verify`,
+        )
+        .set('Authorization', `Bearer ${verifierAuth.accessToken}`)
+        .expect(201);
+
+      const oldVerification = getSuccessData<VerificationResponse>(
+        oldVerificationResponse,
+      );
+
+      expect(oldVerification.verified).toBe(true);
+
+      const newCredential = await issueCredential();
+
+      const newCredentialDocument = await getWalletCredentialDocument(
+        newCredential.walletCredentialId,
+      );
+
+      const newProof = asRecord(newCredentialDocument.proof);
+
+      expect(newProof.verificationMethod).toBe(
+        `${startingDid.did}#key-${rotation.keyVersion}`,
+      );
+
+      const newFlow = await createPresentation(newCredential.credential.id);
+
+      const newVerificationResponse = await request(httpServer)
+        .post(
+          `/api/v1/verification/presentations/${newFlow.presentationId}/verify`,
+        )
+        .set('Authorization', `Bearer ${verifierAuth.accessToken}`)
+        .expect(201);
+
+      const newVerification = getSuccessData<VerificationResponse>(
+        newVerificationResponse,
+      );
+
+      expect(newVerification.verified).toBe(true);
+
+      const rotationAudit = await prisma.auditLog.findFirst({
+        where: {
+          action: 'DID_KEY_ROTATED',
+          resourceType: 'DID',
+          resourceId: universityDidId,
+          createdAt: {
+            gte: suiteStartedAt,
+          },
+        },
+        orderBy: {
+          createdAt: 'desc',
+        },
+      });
+
+      expect(rotationAudit).not.toBeNull();
+    } finally {
+      const versionToDelete = rotatedVersion;
+
+      if (versionToDelete !== null) {
+        await prisma.$transaction(async (transaction) => {
+          await transaction.did.update({
+            where: {
+              id: universityDidId,
+            },
+            data: {
+              currentKeyVersion: startingDid.currentKeyVersion,
+            },
+          });
+
+          await transaction.didKey.update({
+            where: {
+              didId_version: {
+                didId: universityDidId,
+                version: startingKey.version,
+              },
+            },
+            data: {
+              status: startingKey.status,
+              retiredAt: startingKey.retiredAt,
+              revokedAt: startingKey.revokedAt,
+            },
+          });
+
+          await transaction.didKey.deleteMany({
+            where: {
+              didId: universityDidId,
+              version: versionToDelete,
+            },
+          });
+        });
+      }
     }
   });
 
