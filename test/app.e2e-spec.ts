@@ -91,6 +91,21 @@ interface VerificationResponse {
   verifiedClaims: Record<string, unknown>;
 }
 
+interface DidKeyRotationResponse {
+  did: string;
+  keyVersion: number;
+  verificationMethod: string;
+  publicKey: string;
+}
+
+interface DidKeyRevocationResponse {
+  did: string;
+  keyVersion: number;
+  verificationMethod: string;
+  status: DidKeyStatus;
+  revokedAt: string;
+}
+
 interface PendingRequestResponse {
   requestId: string;
 }
@@ -1168,6 +1183,318 @@ describe('SSI Academic Credential API (e2e)', () => {
             where: {
               didId: universityDidId,
               version: versionToDelete,
+            },
+          });
+        });
+      }
+    }
+  });
+
+  it('revokes historical issuer keys and recovers a compromised current issuer key', async () => {
+    const startingDid = await prisma.did.findUnique({
+      where: {
+        id: universityDidId,
+      },
+      select: {
+        id: true,
+        did: true,
+        currentKeyVersion: true,
+      },
+    });
+
+    if (!startingDid) {
+      throw new Error('University DID fixture is unavailable');
+    }
+
+    const startingKey = await prisma.didKey.findUnique({
+      where: {
+        didId_version: {
+          didId: universityDidId,
+          version: startingDid.currentKeyVersion,
+        },
+      },
+      select: {
+        version: true,
+        status: true,
+        retiredAt: true,
+        revokedAt: true,
+      },
+    });
+
+    if (!startingKey || startingKey.status !== DidKeyStatus.ACTIVE) {
+      throw new Error('University active DID key fixture is unavailable');
+    }
+
+    const historicalCredential = await issueCredential();
+
+    const historicalCredentialDocument = await getWalletCredentialDocument(
+      historicalCredential.walletCredentialId,
+    );
+
+    const historicalProof = asRecord(historicalCredentialDocument.proof);
+
+    expect(historicalProof.verificationMethod).toBe(
+      `${startingDid.did}#key-${startingDid.currentKeyVersion}`,
+    );
+
+    let rotatedVersion: number | null = null;
+    let recoveredVersion: number | null = null;
+
+    try {
+      const rotationResponse = await request(httpServer)
+        .post('/api/v1/dids/organization/rotate')
+        .set('Authorization', `Bearer ${issuerAuth.accessToken}`)
+        .expect(201);
+
+      const rotation = getSuccessData<DidKeyRotationResponse>(rotationResponse);
+
+      rotatedVersion = rotation.keyVersion;
+
+      expect(rotation.did).toBe(startingDid.did);
+      expect(rotation.keyVersion).toBe(startingDid.currentKeyVersion + 1);
+      expect(rotation.verificationMethod).toBe(
+        `${startingDid.did}#key-${rotation.keyVersion}`,
+      );
+
+      const revocationResponse = await request(httpServer)
+        .post(
+          `/api/v1/dids/organization/keys/${startingDid.currentKeyVersion}/revoke`,
+        )
+        .set('Authorization', `Bearer ${issuerAuth.accessToken}`)
+        .send({
+          reason: 'E2E historical issuer key compromise',
+        })
+        .expect(201);
+
+      const revocation =
+        getSuccessData<DidKeyRevocationResponse>(revocationResponse);
+
+      expect(revocation.did).toBe(startingDid.did);
+      expect(revocation.keyVersion).toBe(startingDid.currentKeyVersion);
+      expect(revocation.verificationMethod).toBe(
+        `${startingDid.did}#key-${startingDid.currentKeyVersion}`,
+      );
+      expect(revocation.status).toBe(DidKeyStatus.REVOKED);
+
+      const revokedHistoricalKey = await prisma.didKey.findUnique({
+        where: {
+          didId_version: {
+            didId: universityDidId,
+            version: startingDid.currentKeyVersion,
+          },
+        },
+      });
+
+      expect(revokedHistoricalKey?.status).toBe(DidKeyStatus.REVOKED);
+      expect(revokedHistoricalKey?.revokedAt).toBeInstanceOf(Date);
+
+      const historicalFlow = await createPresentation(
+        historicalCredential.credential.id,
+      );
+
+      const historicalVerificationResponse = await request(httpServer)
+        .post(
+          `/api/v1/verification/presentations/${historicalFlow.presentationId}/verify`,
+        )
+        .set('Authorization', `Bearer ${verifierAuth.accessToken}`)
+        .expect(422);
+
+      expect(getError(historicalVerificationResponse).error.code).toBe(
+        'BUSINESS_RULE_VIOLATION',
+      );
+
+      const historicalResult = await prisma.verificationResult.findUnique({
+        where: {
+          presentationId: historicalFlow.presentationId,
+        },
+      });
+
+      expect(historicalResult?.finalResult).toBe(
+        VerificationFinalResult.FAILED,
+      );
+
+      const compromisedCredential = await issueCredential();
+
+      const compromisedCredentialDocument = await getWalletCredentialDocument(
+        compromisedCredential.walletCredentialId,
+      );
+
+      const compromisedProof = asRecord(compromisedCredentialDocument.proof);
+
+      expect(compromisedProof.verificationMethod).toBe(
+        `${startingDid.did}#key-${rotation.keyVersion}`,
+      );
+
+      const recoveryResponse = await request(httpServer)
+        .post('/api/v1/dids/organization/recover')
+        .set('Authorization', `Bearer ${issuerAuth.accessToken}`)
+        .send({
+          reason: 'E2E current issuer key compromise',
+        })
+        .expect(201);
+
+      const recovery = getSuccessData<DidKeyRotationResponse>(recoveryResponse);
+
+      recoveredVersion = recovery.keyVersion;
+
+      expect(recovery.did).toBe(startingDid.did);
+      expect(recovery.keyVersion).toBe(rotation.keyVersion + 1);
+      expect(recovery.verificationMethod).toBe(
+        `${startingDid.did}#key-${recovery.keyVersion}`,
+      );
+
+      const [compromisedKey, recoveredKey, didAfterRecovery] =
+        await Promise.all([
+          prisma.didKey.findUnique({
+            where: {
+              didId_version: {
+                didId: universityDidId,
+                version: rotation.keyVersion,
+              },
+            },
+          }),
+          prisma.didKey.findUnique({
+            where: {
+              didId_version: {
+                didId: universityDidId,
+                version: recovery.keyVersion,
+              },
+            },
+          }),
+          prisma.did.findUnique({
+            where: {
+              id: universityDidId,
+            },
+            select: {
+              currentKeyVersion: true,
+            },
+          }),
+        ]);
+
+      expect(compromisedKey?.status).toBe(DidKeyStatus.REVOKED);
+      expect(compromisedKey?.revokedAt).toBeInstanceOf(Date);
+      expect(recoveredKey?.status).toBe(DidKeyStatus.ACTIVE);
+      expect(didAfterRecovery?.currentKeyVersion).toBe(recovery.keyVersion);
+
+      const compromisedFlow = await createPresentation(
+        compromisedCredential.credential.id,
+      );
+
+      const compromisedVerificationResponse = await request(httpServer)
+        .post(
+          `/api/v1/verification/presentations/${compromisedFlow.presentationId}/verify`,
+        )
+        .set('Authorization', `Bearer ${verifierAuth.accessToken}`)
+        .expect(422);
+
+      expect(getError(compromisedVerificationResponse).error.code).toBe(
+        'BUSINESS_RULE_VIOLATION',
+      );
+
+      const compromisedResult = await prisma.verificationResult.findUnique({
+        where: {
+          presentationId: compromisedFlow.presentationId,
+        },
+      });
+
+      expect(compromisedResult?.finalResult).toBe(
+        VerificationFinalResult.FAILED,
+      );
+
+      const recoveredCredential = await issueCredential();
+
+      const recoveredCredentialDocument = await getWalletCredentialDocument(
+        recoveredCredential.walletCredentialId,
+      );
+
+      const recoveredProof = asRecord(recoveredCredentialDocument.proof);
+
+      expect(recoveredProof.verificationMethod).toBe(
+        `${startingDid.did}#key-${recovery.keyVersion}`,
+      );
+
+      const recoveredFlow = await createPresentation(
+        recoveredCredential.credential.id,
+      );
+
+      const recoveredVerificationResponse = await request(httpServer)
+        .post(
+          `/api/v1/verification/presentations/${recoveredFlow.presentationId}/verify`,
+        )
+        .set('Authorization', `Bearer ${verifierAuth.accessToken}`)
+        .expect(201);
+
+      const recoveredVerification = getSuccessData<VerificationResponse>(
+        recoveredVerificationResponse,
+      );
+
+      expect(recoveredVerification.verified).toBe(true);
+
+      const lifecycleAudits = await prisma.auditLog.findMany({
+        where: {
+          resourceType: 'DID',
+          resourceId: universityDidId,
+          action: {
+            in: ['DID_KEY_REVOKED', 'DID_KEY_RECOVERED'],
+          },
+          createdAt: {
+            gte: suiteStartedAt,
+          },
+        },
+        select: {
+          action: true,
+          actorId: true,
+          organizationId: true,
+        },
+      });
+
+      const lifecycleActions = new Set(
+        lifecycleAudits.map((auditLog) => auditLog.action),
+      );
+
+      expect(lifecycleActions.has('DID_KEY_REVOKED')).toBe(true);
+      expect(lifecycleActions.has('DID_KEY_RECOVERED')).toBe(true);
+
+      for (const auditLog of lifecycleAudits) {
+        expect(auditLog.actorId).toBe(issuerAdminId);
+        expect(auditLog.organizationId).toBe(universityId);
+      }
+    } finally {
+      const generatedVersions = [rotatedVersion, recoveredVersion].filter(
+        (value): value is number => value !== null,
+      );
+
+      if (generatedVersions.length > 0) {
+        await prisma.$transaction(async (transaction) => {
+          await transaction.did.update({
+            where: {
+              id: universityDidId,
+            },
+            data: {
+              currentKeyVersion: startingDid.currentKeyVersion,
+            },
+          });
+
+          await transaction.didKey.update({
+            where: {
+              didId_version: {
+                didId: universityDidId,
+                version: startingKey.version,
+              },
+            },
+            data: {
+              status: startingKey.status,
+              retiredAt: startingKey.retiredAt,
+              revokedAt: startingKey.revokedAt,
+            },
+          });
+
+          await transaction.didKey.deleteMany({
+            where: {
+              didId: universityDidId,
+              version: {
+                in: generatedVersions,
+              },
             },
           });
         });
