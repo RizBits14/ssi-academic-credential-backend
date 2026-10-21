@@ -773,6 +773,17 @@ describe('SSI Academic Credential API (e2e)', () => {
             },
           },
         });
+
+        await prisma.refreshTokenFamily.deleteMany({
+          where: {
+            createdAt: {
+              gte: suiteStartedAt,
+            },
+            userId: {
+              in: cleanupUserIds,
+            },
+          },
+        });
       }
     } finally {
       await app.close();
@@ -834,6 +845,133 @@ describe('SSI Academic Credential API (e2e)', () => {
     expect(getError(invalidLoginResponse).error.code).toBe(
       'AUTH_INVALID_CREDENTIALS',
     );
+  });
+
+  it('revokes the refresh-token family after concurrent reuse of the same parent token', async () => {
+    const isolatedSession = await login('applicant@example.com');
+
+    const parentTokenHash = createHash('sha256')
+      .update(isolatedSession.refreshToken)
+      .digest('hex');
+
+    const parentTokenBeforeRace = await prisma.refreshToken.findUnique({
+      where: {
+        tokenHash: parentTokenHash,
+      },
+      select: {
+        userId: true,
+        familyId: true,
+        revokedAt: true,
+        family: {
+          select: {
+            revokedAt: true,
+          },
+        },
+      },
+    });
+
+    if (!parentTokenBeforeRace) {
+      throw new Error('Refresh-token fixture is unavailable');
+    }
+
+    expect(parentTokenBeforeRace.userId).toBe(holderId);
+    expect(parentTokenBeforeRace.revokedAt).toBeNull();
+    expect(parentTokenBeforeRace.family.revokedAt).toBeNull();
+
+    const [firstResponse, secondResponse] = await Promise.all([
+      request(httpServer).post('/api/v1/auth/refresh').send({
+        refreshToken: isolatedSession.refreshToken,
+      }),
+      request(httpServer).post('/api/v1/auth/refresh').send({
+        refreshToken: isolatedSession.refreshToken,
+      }),
+    ]);
+
+    const responses = [firstResponse, secondResponse];
+    const successfulResponses = responses.filter(
+      (response) => response.status === 200,
+    );
+    const rejectedResponses = responses.filter(
+      (response) => response.status === 401,
+    );
+
+    expect(successfulResponses).toHaveLength(1);
+    expect(rejectedResponses).toHaveLength(1);
+
+    const successfulResponse = successfulResponses[0];
+
+    if (!successfulResponse) {
+      throw new Error('Concurrent refresh did not produce a winner');
+    }
+
+    const rotatedTokens = getSuccessData<{
+      accessToken: string;
+      refreshToken: string;
+    }>(successfulResponse);
+
+    expect(rotatedTokens.accessToken).toEqual(expect.any(String));
+    expect(rotatedTokens.refreshToken).toEqual(expect.any(String));
+    expect(rotatedTokens.refreshToken).not.toBe(isolatedSession.refreshToken);
+
+    const rejectedResponse = rejectedResponses[0];
+
+    if (!rejectedResponse) {
+      throw new Error('Concurrent refresh did not reject replay');
+    }
+
+    expect(getError(rejectedResponse).success).toBe(false);
+
+    const childTokenHash = createHash('sha256')
+      .update(rotatedTokens.refreshToken)
+      .digest('hex');
+
+    const [parentTokenAfterRace, childTokenAfterRace, familyAfterRace] =
+      await Promise.all([
+        prisma.refreshToken.findUnique({
+          where: {
+            tokenHash: parentTokenHash,
+          },
+          select: {
+            familyId: true,
+            revokedAt: true,
+          },
+        }),
+        prisma.refreshToken.findUnique({
+          where: {
+            tokenHash: childTokenHash,
+          },
+          select: {
+            userId: true,
+            familyId: true,
+            revokedAt: true,
+          },
+        }),
+        prisma.refreshTokenFamily.findUnique({
+          where: {
+            id: parentTokenBeforeRace.familyId,
+          },
+          select: {
+            revokedAt: true,
+          },
+        }),
+      ]);
+
+    expect(parentTokenAfterRace?.revokedAt).toBeInstanceOf(Date);
+    expect(familyAfterRace?.revokedAt).toBeInstanceOf(Date);
+
+    expect(childTokenAfterRace).not.toBeNull();
+    expect(childTokenAfterRace?.userId).toBe(holderId);
+    expect(childTokenAfterRace?.familyId).toBe(parentTokenBeforeRace.familyId);
+    expect(childTokenAfterRace?.revokedAt).toBeInstanceOf(Date);
+
+    const childReplayResponse = await request(httpServer)
+      .post('/api/v1/auth/refresh')
+      .send({
+        refreshToken: rotatedTokens.refreshToken,
+      })
+      .expect(401);
+
+    expect(getError(childReplayResponse).success).toBe(false);
   });
 
   it('completes the full credential-to-bank verification workflow', async () => {
