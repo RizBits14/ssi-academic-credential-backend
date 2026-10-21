@@ -25,6 +25,12 @@ interface RefreshTokenPayload {
   exp?: number;
 }
 
+interface TokenPair {
+  accessToken: string;
+  refreshToken: string;
+  refreshTokenExpiresAt: Date;
+}
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -134,17 +140,29 @@ export class AuthService {
       throw new UnauthorizedException('Invalid refresh token');
     }
 
-    const tokenResult = await this.refreshTokenService.consumeToken(
-      dto.refreshToken,
+    const nextTokens = await this.createTokenPair(
       user.id,
+      user.email,
+      user.role,
       payload.familyId,
     );
 
-    if (tokenResult !== 'consumed') {
+    const tokenResult = await this.refreshTokenService.rotateToken(
+      dto.refreshToken,
+      user.id,
+      payload.familyId,
+      nextTokens.refreshToken,
+      nextTokens.refreshTokenExpiresAt,
+    );
+
+    if (tokenResult !== 'rotated') {
       throw new UnauthorizedException('Invalid refresh token');
     }
 
-    return this.issueTokens(user.id, user.email, user.role, payload.familyId);
+    return {
+      accessToken: nextTokens.accessToken,
+      refreshToken: nextTokens.refreshToken,
+    };
   }
 
   async logout(userId: string, dto: RefreshTokenDto): Promise<void> {
@@ -166,6 +184,27 @@ export class AuthService {
     role: UserRole,
     familyId: string,
   ) {
+    const tokens = await this.createTokenPair(userId, email, role, familyId);
+
+    await this.refreshTokenService.storeToken(
+      userId,
+      familyId,
+      tokens.refreshToken,
+      tokens.refreshTokenExpiresAt,
+    );
+
+    return {
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+    };
+  }
+
+  private async createTokenPair(
+    userId: string,
+    email: string,
+    role: UserRole,
+    familyId: string,
+  ): Promise<TokenPair> {
     const payload = {
       sub: userId,
       email,
@@ -198,18 +237,10 @@ export class AuthService {
       throw new Error('Refresh token expiration could not be determined');
     }
 
-    const refreshTokenExpiresAt = new Date(decodedRefreshToken.exp * 1000);
-
-    await this.refreshTokenService.storeToken(
-      userId,
-      familyId,
-      refreshToken,
-      refreshTokenExpiresAt,
-    );
-
     return {
       accessToken,
       refreshToken,
+      refreshTokenExpiresAt: new Date(decodedRefreshToken.exp * 1000),
     };
   }
 }

@@ -153,6 +153,79 @@ describe('AuthService - Refresh Token Security', () => {
     expect(storedExpiresAt.getTime()).toBe(decoded.exp * 1000);
   });
 
+  it('uses atomic token rotation for refresh requests', async () => {
+    const jwtService = new JwtService({
+      secret: 'test-access-secret',
+      signOptions: { expiresIn: '15m' },
+    });
+
+    const user = {
+      id: 'user-123',
+      email: 'student@example.com',
+      role: UserRole.HOLDER,
+    };
+
+    const familyId = 'family-123';
+
+    const rotateToken = jest.fn<
+      (
+        currentToken: string,
+        userId: string,
+        familyId: string,
+        nextToken: string,
+        nextExpiresAt: Date,
+      ) => Promise<'rotated'>
+    >(() => Promise.resolve('rotated'));
+
+    const authService = new AuthService(
+      {
+        findById: () => Promise.resolve(user),
+      } as never,
+      {} as never,
+      jwtService,
+      createConfigServiceMock() as never,
+      {
+        rotateToken,
+      } as never,
+      {} as never,
+    );
+
+    const refreshToken = await jwtService.signAsync(
+      {
+        sub: user.id,
+        email: user.email,
+        role: user.role,
+        jti: 'original-token-id',
+        familyId,
+      },
+      {
+        secret: 'test-refresh-secret',
+        expiresIn: '7d',
+        algorithm: 'HS256',
+      },
+    );
+
+    const result = await authService.refresh({ refreshToken });
+
+    expect(result.accessToken).toEqual(expect.any(String));
+    expect(result.refreshToken).toEqual(expect.any(String));
+    expect(result.refreshToken).not.toBe(refreshToken);
+
+    expect(rotateToken).toHaveBeenCalledTimes(1);
+
+    const rotationCall = rotateToken.mock.calls[0];
+
+    if (!rotationCall) {
+      throw new Error('Expected refresh token rotation');
+    }
+
+    expect(rotationCall[0]).toBe(refreshToken);
+    expect(rotationCall[1]).toBe(user.id);
+    expect(rotationCall[2]).toBe(familyId);
+    expect(rotationCall[3]).toBe(result.refreshToken);
+    expect(rotationCall[4]).toBeInstanceOf(Date);
+  });
+
   it('allows only one of two concurrent refresh attempts using the same token', async () => {
     const jwtService = new JwtService({
       secret: 'test-access-secret',
@@ -169,21 +242,21 @@ describe('AuthService - Refresh Token Security', () => {
 
     let tokenAvailable = true;
 
-    const consumeToken = jest.fn<
+    const rotateToken = jest.fn<
       (
-        token: string,
+        currentToken: string,
         userId: string,
         familyId: string,
-      ) => Promise<'consumed' | 'invalid'>
+        nextToken: string,
+        nextExpiresAt: Date,
+      ) => Promise<'rotated' | 'reused'>
     >(() => {
-      const result = tokenAvailable ? 'consumed' : 'invalid';
+      const result = tokenAvailable ? 'rotated' : 'reused';
 
       tokenAvailable = false;
 
       return Promise.resolve(result);
     });
-
-    const storeToken = jest.fn(() => Promise.resolve());
 
     const authService = new AuthService(
       {
@@ -193,8 +266,7 @@ describe('AuthService - Refresh Token Security', () => {
       jwtService,
       createConfigServiceMock() as never,
       {
-        consumeToken,
-        storeToken,
+        rotateToken,
       } as never,
       {} as never,
     );
@@ -229,14 +301,8 @@ describe('AuthService - Refresh Token Security', () => {
     const results = await Promise.all([attemptRefresh(), attemptRefresh()]);
 
     expect(results.filter((result) => result === 'success')).toHaveLength(1);
-
     expect(results.filter((result) => result === 'rejected')).toHaveLength(1);
-
-    expect(consumeToken).toHaveBeenCalledTimes(2);
-
-    expect(consumeToken).toHaveBeenCalledWith(refreshToken, user.id, familyId);
-
-    expect(storeToken).toHaveBeenCalledTimes(1);
+    expect(rotateToken).toHaveBeenCalledTimes(2);
   });
 
   it('rejects a refresh token that does not contain a token family', async () => {
@@ -251,7 +317,7 @@ describe('AuthService - Refresh Token Security', () => {
       role: UserRole.HOLDER,
     };
 
-    const consumeToken = jest.fn();
+    const rotateToken = jest.fn();
 
     const authService = new AuthService(
       {
@@ -261,7 +327,7 @@ describe('AuthService - Refresh Token Security', () => {
       jwtService,
       createConfigServiceMock() as never,
       {
-        consumeToken,
+        rotateToken,
       } as never,
       {} as never,
     );
@@ -284,6 +350,6 @@ describe('AuthService - Refresh Token Security', () => {
       UnauthorizedException,
     );
 
-    expect(consumeToken).not.toHaveBeenCalled();
+    expect(rotateToken).not.toHaveBeenCalled();
   });
 });
