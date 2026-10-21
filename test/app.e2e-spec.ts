@@ -1502,6 +1502,301 @@ describe('SSI Academic Credential API (e2e)', () => {
     }
   });
 
+  it('allows only one of two concurrent issuer DID rotations to win', async () => {
+    const startingDid = await prisma.did.findUnique({
+      where: {
+        id: universityDidId,
+      },
+      select: {
+        id: true,
+        currentKeyVersion: true,
+      },
+    });
+
+    if (!startingDid) {
+      throw new Error('University DID fixture is unavailable');
+    }
+
+    const startingKey = await prisma.didKey.findUnique({
+      where: {
+        didId_version: {
+          didId: universityDidId,
+          version: startingDid.currentKeyVersion,
+        },
+      },
+      select: {
+        version: true,
+        status: true,
+        retiredAt: true,
+        revokedAt: true,
+      },
+    });
+
+    if (!startingKey || startingKey.status !== DidKeyStatus.ACTIVE) {
+      throw new Error('University active DID key fixture is unavailable');
+    }
+
+    let generatedVersion: number | null = null;
+
+    try {
+      const results = await Promise.allSettled([
+        didService.rotateForOrganization(universityId, issuerAdminId),
+        didService.rotateForOrganization(universityId, issuerAdminId),
+      ]);
+
+      const fulfilled = results.filter(
+        (result) => result.status === 'fulfilled',
+      );
+      const rejected = results.filter((result) => result.status === 'rejected');
+
+      expect(fulfilled).toHaveLength(1);
+      expect(rejected).toHaveLength(1);
+
+      const successfulResult = results.find(
+        (result) => result.status === 'fulfilled',
+      );
+
+      if (!successfulResult || successfulResult.status !== 'fulfilled') {
+        throw new Error('Concurrent rotation did not produce a winner');
+      }
+
+      generatedVersion = successfulResult.value.keyVersion;
+
+      expect(generatedVersion).toBe(startingDid.currentKeyVersion + 1);
+
+      const [didAfterRace, previousKey, newKey, didKeys] = await Promise.all([
+        prisma.did.findUnique({
+          where: {
+            id: universityDidId,
+          },
+          select: {
+            currentKeyVersion: true,
+          },
+        }),
+        prisma.didKey.findUnique({
+          where: {
+            didId_version: {
+              didId: universityDidId,
+              version: startingDid.currentKeyVersion,
+            },
+          },
+        }),
+        prisma.didKey.findUnique({
+          where: {
+            didId_version: {
+              didId: universityDidId,
+              version: generatedVersion,
+            },
+          },
+        }),
+        prisma.didKey.findMany({
+          where: {
+            didId: universityDidId,
+            version: {
+              in: [startingDid.currentKeyVersion, generatedVersion],
+            },
+          },
+          orderBy: {
+            version: 'asc',
+          },
+        }),
+      ]);
+
+      expect(didAfterRace?.currentKeyVersion).toBe(generatedVersion);
+      expect(previousKey?.status).toBe(DidKeyStatus.RETIRED);
+      expect(newKey?.status).toBe(DidKeyStatus.ACTIVE);
+      expect(didKeys).toHaveLength(2);
+    } finally {
+      const versionToDelete = generatedVersion;
+
+      if (versionToDelete !== null) {
+        await prisma.$transaction(async (transaction) => {
+          await transaction.did.update({
+            where: {
+              id: universityDidId,
+            },
+            data: {
+              currentKeyVersion: startingDid.currentKeyVersion,
+            },
+          });
+
+          await transaction.didKey.update({
+            where: {
+              didId_version: {
+                didId: universityDidId,
+                version: startingKey.version,
+              },
+            },
+            data: {
+              status: startingKey.status,
+              retiredAt: startingKey.retiredAt,
+              revokedAt: startingKey.revokedAt,
+            },
+          });
+
+          await transaction.didKey.deleteMany({
+            where: {
+              didId: universityDidId,
+              version: versionToDelete,
+            },
+          });
+        });
+      }
+    }
+  });
+
+  it('allows only one of two concurrent issuer DID recoveries to win', async () => {
+    const startingDid = await prisma.did.findUnique({
+      where: {
+        id: universityDidId,
+      },
+      select: {
+        id: true,
+        currentKeyVersion: true,
+      },
+    });
+
+    if (!startingDid) {
+      throw new Error('University DID fixture is unavailable');
+    }
+
+    const startingKey = await prisma.didKey.findUnique({
+      where: {
+        didId_version: {
+          didId: universityDidId,
+          version: startingDid.currentKeyVersion,
+        },
+      },
+      select: {
+        version: true,
+        status: true,
+        retiredAt: true,
+        revokedAt: true,
+      },
+    });
+
+    if (!startingKey || startingKey.status !== DidKeyStatus.ACTIVE) {
+      throw new Error('University active DID key fixture is unavailable');
+    }
+
+    let generatedVersion: number | null = null;
+
+    try {
+      const results = await Promise.allSettled([
+        didService.recoverForOrganization(
+          universityId,
+          issuerAdminId,
+          'Concurrent E2E recovery race',
+        ),
+        didService.recoverForOrganization(
+          universityId,
+          issuerAdminId,
+          'Concurrent E2E recovery race',
+        ),
+      ]);
+
+      const fulfilled = results.filter(
+        (result) => result.status === 'fulfilled',
+      );
+      const rejected = results.filter((result) => result.status === 'rejected');
+
+      expect(fulfilled).toHaveLength(1);
+      expect(rejected).toHaveLength(1);
+
+      const successfulResult = results.find(
+        (result) => result.status === 'fulfilled',
+      );
+
+      if (!successfulResult || successfulResult.status !== 'fulfilled') {
+        throw new Error('Concurrent recovery did not produce a winner');
+      }
+
+      generatedVersion = successfulResult.value.keyVersion;
+
+      expect(generatedVersion).toBe(startingDid.currentKeyVersion + 1);
+
+      const [didAfterRace, compromisedKey, recoveredKey, didKeys] =
+        await Promise.all([
+          prisma.did.findUnique({
+            where: {
+              id: universityDidId,
+            },
+            select: {
+              currentKeyVersion: true,
+            },
+          }),
+          prisma.didKey.findUnique({
+            where: {
+              didId_version: {
+                didId: universityDidId,
+                version: startingDid.currentKeyVersion,
+              },
+            },
+          }),
+          prisma.didKey.findUnique({
+            where: {
+              didId_version: {
+                didId: universityDidId,
+                version: generatedVersion,
+              },
+            },
+          }),
+          prisma.didKey.findMany({
+            where: {
+              didId: universityDidId,
+              version: {
+                in: [startingDid.currentKeyVersion, generatedVersion],
+              },
+            },
+            orderBy: {
+              version: 'asc',
+            },
+          }),
+        ]);
+
+      expect(didAfterRace?.currentKeyVersion).toBe(generatedVersion);
+      expect(compromisedKey?.status).toBe(DidKeyStatus.REVOKED);
+      expect(recoveredKey?.status).toBe(DidKeyStatus.ACTIVE);
+      expect(didKeys).toHaveLength(2);
+    } finally {
+      const versionToDelete = generatedVersion;
+
+      if (versionToDelete !== null) {
+        await prisma.$transaction(async (transaction) => {
+          await transaction.did.update({
+            where: {
+              id: universityDidId,
+            },
+            data: {
+              currentKeyVersion: startingDid.currentKeyVersion,
+            },
+          });
+
+          await transaction.didKey.update({
+            where: {
+              didId_version: {
+                didId: universityDidId,
+                version: startingKey.version,
+              },
+            },
+            data: {
+              status: startingKey.status,
+              retiredAt: startingKey.retiredAt,
+              revokedAt: startingKey.revokedAt,
+            },
+          });
+
+          await transaction.didKey.deleteMany({
+            where: {
+              didId: universityDidId,
+              version: versionToDelete,
+            },
+          });
+        });
+      }
+    }
+  });
+
   it('rejects a tampered disclosed CGPA even with a newly signed holder proof', async () => {
     const issued = await issueCredential();
     const flow = await createPresentation(issued.credential.id);
