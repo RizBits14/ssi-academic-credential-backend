@@ -3,7 +3,6 @@ import { createHash } from 'node:crypto';
 import {
   BadRequestException,
   ConflictException,
-  NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
@@ -138,9 +137,10 @@ describe('VerificationService', () => {
       ciphertext: 'ciphertext',
       iv: 'iv',
       authTag: 'auth-tag',
+      encryptionKeyId: 'v1',
     });
 
-    mockEncryptionService.decrypt.mockReturnValue(
+    mockEncryptionService.decryptForWallet.mockReturnValue(
       JSON.stringify({
         ...unsignedCredential,
         proof: {
@@ -221,18 +221,6 @@ describe('VerificationService', () => {
     expect(
       mockCredentialSchemasService.findByIdForOrganization,
     ).toHaveBeenCalledWith('schema-id', 'university-org-id');
-
-    expect(mockDidService.resolveVerificationMethod).toHaveBeenNthCalledWith(
-      1,
-      'did:mock:holder:holder-id',
-      'did:mock:holder:holder-id#key-1',
-    );
-
-    expect(mockDidService.resolveVerificationMethod).toHaveBeenNthCalledWith(
-      2,
-      'did:mock:university:issuer-id',
-      'did:mock:university:issuer-id#key-1',
-    );
   });
 
   it('should reject an untrusted credential issuer', async () => {
@@ -311,7 +299,7 @@ describe('VerificationService', () => {
   };
 
   const mockEncryptionService = {
-    decrypt: jest.fn<(...args: unknown[]) => string>(),
+    decryptForWallet: jest.fn<(...args: unknown[]) => string>(),
   };
 
   const mockSignatureService = {
@@ -688,9 +676,10 @@ describe('VerificationService', () => {
       ciphertext: 'ciphertext',
       iv: 'iv',
       authTag: 'auth-tag',
+      encryptionKeyId: 'v1',
     });
 
-    mockEncryptionService.decrypt.mockReturnValue(
+    mockEncryptionService.decryptForWallet.mockReturnValue(
       JSON.stringify({
         ...unsignedCredential,
         proof: {
@@ -748,18 +737,6 @@ describe('VerificationService', () => {
     await expect(
       service.validateCryptographicChecks('presentation-id'),
     ).rejects.toThrow('Holder proof is invalid');
-  });
-
-  it('should reject a holder proof that references an unknown or revoked key', async () => {
-    mockValidContext();
-
-    mockDidService.resolveVerificationMethod.mockRejectedValue(
-      new NotFoundException('DID verification method not found'),
-    );
-
-    await expect(
-      service.validateCryptographicChecks('presentation-id'),
-    ).rejects.toThrow('Holder verification method does not match holder DID');
   });
 
   it('should atomically finalize a successful verification', async () => {

@@ -37,6 +37,8 @@ describe('VerificationRequestsService', () => {
     },
 
     verificationRequest: {
+      findUnique: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+
       findFirst: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
 
       updateMany: jest.fn<(...args: unknown[]) => Promise<{ count: number }>>(),
@@ -62,7 +64,7 @@ describe('VerificationRequestsService', () => {
   };
 
   const mockEncryptionService = {
-    decrypt: jest.fn<(...args: unknown[]) => string>(),
+    decryptForWallet: jest.fn<(...args: unknown[]) => string>(),
   };
 
   const mockDidService = {
@@ -351,12 +353,13 @@ describe('VerificationRequestsService', () => {
       ciphertext: 'encrypted',
       iv: 'iv',
       authTag: 'tag',
+      encryptionKeyId: 'v1',
       credential: {
         id: 'credential-id',
       },
     });
 
-    mockEncryptionService.decrypt.mockReturnValue(
+    mockEncryptionService.decryptForWallet.mockReturnValue(
       JSON.stringify({
         issuer: {
           name: 'Example University',

@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 import { EncryptionService } from '../crypto/encryption.service';
-// import { HashingService } from '../crypto/hashing.service';
 import { DidService } from '../did/did.service';
 import { CredentialsService } from './credentials.service';
 
@@ -21,7 +20,7 @@ describe('CredentialsService', () => {
   };
 
   const mockEncryptionService = {
-    encrypt: jest.fn<(...args: unknown[]) => unknown>(),
+    encryptForWallet: jest.fn<(...args: unknown[]) => unknown>(),
   };
 
   let service: CredentialsService;
@@ -156,13 +155,14 @@ describe('CredentialsService', () => {
       ciphertext: 'ciphertext',
       iv: 'iv',
       authTag: 'auth-tag',
+      keyId: 'v1',
     };
 
-    mockEncryptionService.encrypt.mockReturnValue(encrypted);
+    mockEncryptionService.encryptForWallet.mockReturnValue(encrypted);
 
     const result = service.encryptCredentialForWallet(signedCredential);
 
-    expect(mockEncryptionService.encrypt).toHaveBeenCalledWith(
+    expect(mockEncryptionService.encryptForWallet).toHaveBeenCalledWith(
       JSON.stringify(signedCredential),
     );
 

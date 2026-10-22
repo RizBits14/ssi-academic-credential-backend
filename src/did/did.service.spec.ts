@@ -50,12 +50,13 @@ describe('DidService', () => {
   };
 
   const mockEncryptionService = {
-    encrypt: jest.fn(() => ({
+    encryptForDid: jest.fn(() => ({
       ciphertext: 'encrypted-private-key',
       iv: 'test-iv',
       authTag: 'test-auth-tag',
+      keyId: 'v1',
     })),
-    decrypt: jest.fn(() => 'PRIVATE_KEY'),
+    decryptForDid: jest.fn(() => 'PRIVATE_KEY'),
   };
 
   const mockSignatureService = {
@@ -127,6 +128,7 @@ describe('DidService', () => {
         encryptedPrivateKey: 'encrypted-private-key',
         iv: 'test-iv',
         authTag: 'test-auth-tag',
+        encryptionKeyId: 'v1',
         algorithm: 'Ed25519',
         status: DidKeyStatus.ACTIVE,
       },
@@ -370,6 +372,7 @@ describe('DidService', () => {
       encryptedPrivateKey: 'encrypted-private-key',
       iv: 'test-iv',
       authTag: 'test-auth-tag',
+      encryptionKeyId: 'v1',
       algorithm: 'Ed25519',
       version: 2,
       status: DidKeyStatus.ACTIVE,
@@ -409,6 +412,7 @@ describe('DidService', () => {
       encryptedPrivateKey: 'encrypted-private-key',
       iv: 'test-iv',
       authTag: 'test-auth-tag',
+      encryptionKeyId: 'v1',
       algorithm: 'Ed25519',
       version: 2,
       status: DidKeyStatus.RETIRED,
@@ -418,7 +422,7 @@ describe('DidService', () => {
       service.signForOrganization('university-id', 'credential-payload'),
     ).rejects.toThrow('Organization DID signing key is not active');
 
-    expect(mockEncryptionService.decrypt).not.toHaveBeenCalled();
+    expect(mockEncryptionService.decryptForDid).not.toHaveBeenCalled();
   });
 
   it('should rotate an organization key atomically and retire the previous key', async () => {
@@ -755,6 +759,7 @@ describe('DidService', () => {
         encryptedPrivateKey: 'encrypted-private-key',
         iv: 'test-iv',
         authTag: 'test-auth-tag',
+        encryptionKeyId: 'v1',
         algorithm: 'Ed25519',
         status: DidKeyStatus.ACTIVE,
       },

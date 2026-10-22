@@ -24,7 +24,7 @@ describe('WalletService', () => {
   };
 
   const mockEncryptionService = {
-    decrypt: jest.fn<(...args: unknown[]) => string>(),
+    decryptForWallet: jest.fn<(...args: unknown[]) => string>(),
   };
 
   let service: WalletService;
@@ -77,6 +77,7 @@ describe('WalletService', () => {
       ciphertext: 'encrypted-data',
       iv: 'test-iv',
       authTag: 'test-auth-tag',
+      encryptionKeyId: 'v1',
 
       credential: {
         id: 'credential-id',
@@ -91,7 +92,7 @@ describe('WalletService', () => {
       },
     });
 
-    mockEncryptionService.decrypt.mockReturnValue(
+    mockEncryptionService.decryptForWallet.mockReturnValue(
       JSON.stringify({
         id: 'urn:uuid:test',
 
@@ -110,10 +111,11 @@ describe('WalletService', () => {
       'wallet-credential-id',
     );
 
-    expect(mockEncryptionService.decrypt).toHaveBeenCalledWith({
+    expect(mockEncryptionService.decryptForWallet).toHaveBeenCalledWith({
       ciphertext: 'encrypted-data',
       iv: 'test-iv',
       authTag: 'test-auth-tag',
+      keyId: 'v1',
     });
 
     expect(mockPrismaService.auditLog.create).toHaveBeenCalledWith({

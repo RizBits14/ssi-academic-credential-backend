@@ -46,6 +46,7 @@ describe('CredentialIssuanceService', () => {
         ciphertext: string;
         iv: string;
         authTag: string;
+        keyId: string;
       }
     >(),
   };
@@ -158,6 +159,7 @@ describe('CredentialIssuanceService', () => {
       ciphertext: 'encrypted',
       iv: 'iv',
       authTag: 'auth-tag',
+      keyId: 'v1',
     });
 
     const result = await service.prepare({
@@ -200,6 +202,7 @@ describe('CredentialIssuanceService', () => {
           ciphertext: 'encrypted',
           iv: 'iv',
           authTag: 'auth-tag',
+          keyId: 'v1',
         },
       }),
     );
@@ -251,6 +254,7 @@ describe('CredentialIssuanceService', () => {
         ciphertext: 'encrypted',
         iv: 'iv',
         authTag: 'auth-tag',
+        keyId: 'v1',
       },
     };
 
@@ -307,6 +311,7 @@ describe('CredentialIssuanceService', () => {
         ciphertext: 'encrypted',
         iv: 'iv',
         authTag: 'auth-tag',
+        encryptionKeyId: 'v1',
       },
     });
 
