@@ -107,7 +107,7 @@ export class CredentialsService {
   encryptCredentialForWallet(signedCredential: Record<string, unknown>) {
     const plaintext = JSON.stringify(signedCredential);
 
-    return this.encryptionService.encrypt(plaintext);
+    return this.encryptionService.encryptForWallet(plaintext);
   }
 
   canonicalize(value: unknown): string {

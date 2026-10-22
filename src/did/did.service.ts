@@ -78,6 +78,7 @@ interface SigningDidKeyRecord {
   encryptedPrivateKey: string;
   iv: string;
   authTag: string;
+  encryptionKeyId: string | null;
   algorithm: string;
   version: number;
   status: DidKeyStatus;
@@ -267,10 +268,11 @@ export class DidService {
 
     this.assertKeyCanSign(key, 'Organization');
 
-    const privateKey = this.encryptionService.decrypt({
+    const privateKey = this.encryptionService.decryptForDid({
       ciphertext: key.encryptedPrivateKey,
       iv: key.iv,
       authTag: key.authTag,
+      keyId: key.encryptionKeyId,
     });
 
     const signature = this.signatureService.sign(data, privateKey);
@@ -299,10 +301,11 @@ export class DidService {
 
     this.assertKeyCanSign(key, 'Holder');
 
-    const privateKey = this.encryptionService.decrypt({
+    const privateKey = this.encryptionService.decryptForDid({
       ciphertext: key.encryptedPrivateKey,
       iv: key.iv,
       authTag: key.authTag,
+      keyId: key.encryptionKeyId,
     });
 
     const signature = this.signatureService.sign(data, privateKey);
@@ -512,6 +515,7 @@ export class DidService {
         encryptedPrivateKey: true,
         iv: true,
         authTag: true,
+        encryptionKeyId: true,
         algorithm: true,
         version: true,
         status: true,
@@ -602,7 +606,7 @@ export class DidService {
   ): Promise<DidKeyRotationResult> {
     const keyPair = this.signatureService.generateKeyPair();
 
-    const encryptedPrivateKey = this.encryptionService.encrypt(
+    const encryptedPrivateKey = this.encryptionService.encryptForDid(
       keyPair.privateKey,
     );
 
@@ -650,6 +654,7 @@ export class DidService {
           encryptedPrivateKey: encryptedPrivateKey.ciphertext,
           iv: encryptedPrivateKey.iv,
           authTag: encryptedPrivateKey.authTag,
+          encryptionKeyId: encryptedPrivateKey.keyId,
           algorithm: 'Ed25519',
           status: DidKeyStatus.ACTIVE,
         },
@@ -787,7 +792,7 @@ export class DidService {
   ): Promise<DidKeyRotationResult> {
     const keyPair = this.signatureService.generateKeyPair();
 
-    const encryptedPrivateKey = this.encryptionService.encrypt(
+    const encryptedPrivateKey = this.encryptionService.encryptForDid(
       keyPair.privateKey,
     );
 
@@ -835,6 +840,7 @@ export class DidService {
           encryptedPrivateKey: encryptedPrivateKey.ciphertext,
           iv: encryptedPrivateKey.iv,
           authTag: encryptedPrivateKey.authTag,
+          encryptionKeyId: encryptedPrivateKey.keyId,
           algorithm: 'Ed25519',
           status: DidKeyStatus.ACTIVE,
         },
@@ -883,7 +889,7 @@ export class DidService {
   ): Promise<PublicDidRecord> {
     const keyPair = this.signatureService.generateKeyPair();
 
-    const encryptedPrivateKey = this.encryptionService.encrypt(
+    const encryptedPrivateKey = this.encryptionService.encryptForDid(
       keyPair.privateKey,
     );
 
@@ -909,6 +915,7 @@ export class DidService {
           encryptedPrivateKey: encryptedPrivateKey.ciphertext,
           iv: encryptedPrivateKey.iv,
           authTag: encryptedPrivateKey.authTag,
+          encryptionKeyId: encryptedPrivateKey.keyId,
           algorithm: 'Ed25519',
           status: DidKeyStatus.ACTIVE,
         },

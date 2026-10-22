@@ -65,10 +65,11 @@ export class WalletService {
       walletCredentialId,
     );
 
-    const plaintext = this.encryptionService.decrypt({
+    const plaintext = this.encryptionService.decryptForWallet({
       ciphertext: walletCredential.ciphertext,
       iv: walletCredential.iv,
       authTag: walletCredential.authTag,
+      keyId: walletCredential.encryptionKeyId,
     });
 
     const credential = JSON.parse(plaintext) as Record<string, unknown>;

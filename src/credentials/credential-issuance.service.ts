@@ -192,6 +192,7 @@ export class CredentialIssuanceService {
           ciphertext: prepared.encryptedWalletCredential.ciphertext,
           iv: prepared.encryptedWalletCredential.iv,
           authTag: prepared.encryptedWalletCredential.authTag,
+          encryptionKeyId: prepared.encryptedWalletCredential.keyId,
         },
       });
 

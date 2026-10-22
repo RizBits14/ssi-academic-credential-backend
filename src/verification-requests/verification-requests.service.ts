@@ -276,10 +276,11 @@ export class VerificationRequestsService {
       throw new NotFoundException('Credential not found in holder wallet');
     }
 
-    const decryptedCredential = this.encryptionService.decrypt({
+    const decryptedCredential = this.encryptionService.decryptForWallet({
       ciphertext: walletCredential.ciphertext,
       iv: walletCredential.iv,
       authTag: walletCredential.authTag,
+      keyId: walletCredential.encryptionKeyId,
     });
 
     const disclosedClaims = this.extractDisclosedClaims(
