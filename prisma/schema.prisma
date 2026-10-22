@@ -206,6 +206,7 @@ model DidKey {
   encryptedPrivateKey String
   iv                  String
   authTag             String
+  encryptionKeyId     String?
   algorithm           String       @default("Ed25519")
   status              DidKeyStatus @default(ACTIVE)
   retiredAt           DateTime?
@@ -217,6 +218,7 @@ model DidKey {
 
   @@unique([didId, version])
   @@index([didId, status])
+  @@index([encryptionKeyId])
 }
 
 model AcademicRecord {
@@ -306,9 +308,10 @@ model WalletCredential {
   holderId     String
   credentialId String @unique
 
-  ciphertext String
-  iv         String
-  authTag    String
+  ciphertext      String
+  iv              String
+  authTag         String
+  encryptionKeyId String?
 
   holder     User       @relation(fields: [holderId], references: [id], onDelete: Restrict)
   credential Credential @relation(fields: [credentialId], references: [id], onDelete: Restrict)
@@ -317,6 +320,7 @@ model WalletCredential {
   updatedAt DateTime @updatedAt
 
   @@index([holderId])
+  @@index([encryptionKeyId])
 }
 
 model TrustedIssuer {
