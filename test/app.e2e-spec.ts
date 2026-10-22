@@ -1338,12 +1338,10 @@ describe('SSI Academic Credential API (e2e)', () => {
 
       if (versionToDelete !== null) {
         await prisma.$transaction(async (transaction) => {
-          await transaction.did.update({
+          await transaction.didKey.deleteMany({
             where: {
-              id: universityDidId,
-            },
-            data: {
-              currentKeyVersion: startingDid.currentKeyVersion,
+              didId: universityDidId,
+              version: versionToDelete,
             },
           });
 
@@ -1361,10 +1359,12 @@ describe('SSI Academic Credential API (e2e)', () => {
             },
           });
 
-          await transaction.didKey.deleteMany({
+          await transaction.did.update({
             where: {
-              didId: universityDidId,
-              version: versionToDelete,
+              id: universityDidId,
+            },
+            data: {
+              currentKeyVersion: startingDid.currentKeyVersion,
             },
           });
         });
@@ -1648,12 +1648,12 @@ describe('SSI Academic Credential API (e2e)', () => {
 
       if (generatedVersions.length > 0) {
         await prisma.$transaction(async (transaction) => {
-          await transaction.did.update({
+          await transaction.didKey.deleteMany({
             where: {
-              id: universityDidId,
-            },
-            data: {
-              currentKeyVersion: startingDid.currentKeyVersion,
+              didId: universityDidId,
+              version: {
+                in: generatedVersions,
+              },
             },
           });
 
@@ -1671,12 +1671,12 @@ describe('SSI Academic Credential API (e2e)', () => {
             },
           });
 
-          await transaction.didKey.deleteMany({
+          await transaction.did.update({
             where: {
-              didId: universityDidId,
-              version: {
-                in: generatedVersions,
-              },
+              id: universityDidId,
+            },
+            data: {
+              currentKeyVersion: startingDid.currentKeyVersion,
             },
           });
         });
@@ -1793,12 +1793,10 @@ describe('SSI Academic Credential API (e2e)', () => {
 
       if (versionToDelete !== null) {
         await prisma.$transaction(async (transaction) => {
-          await transaction.did.update({
+          await transaction.didKey.deleteMany({
             where: {
-              id: universityDidId,
-            },
-            data: {
-              currentKeyVersion: startingDid.currentKeyVersion,
+              didId: universityDidId,
+              version: versionToDelete,
             },
           });
 
@@ -1816,10 +1814,12 @@ describe('SSI Academic Credential API (e2e)', () => {
             },
           });
 
-          await transaction.didKey.deleteMany({
+          await transaction.did.update({
             where: {
-              didId: universityDidId,
-              version: versionToDelete,
+              id: universityDidId,
+            },
+            data: {
+              currentKeyVersion: startingDid.currentKeyVersion,
             },
           });
         });
@@ -1945,12 +1945,10 @@ describe('SSI Academic Credential API (e2e)', () => {
 
       if (versionToDelete !== null) {
         await prisma.$transaction(async (transaction) => {
-          await transaction.did.update({
+          await transaction.didKey.deleteMany({
             where: {
-              id: universityDidId,
-            },
-            data: {
-              currentKeyVersion: startingDid.currentKeyVersion,
+              didId: universityDidId,
+              version: versionToDelete,
             },
           });
 
@@ -1968,15 +1966,201 @@ describe('SSI Academic Credential API (e2e)', () => {
             },
           });
 
-          await transaction.didKey.deleteMany({
+          await transaction.did.update({
             where: {
-              didId: universityDidId,
-              version: versionToDelete,
+              id: universityDidId,
+            },
+            data: {
+              currentKeyVersion: startingDid.currentKeyVersion,
             },
           });
         });
       }
     }
+  });
+
+  it('enforces one active DID key per DID at the PostgreSQL level', async () => {
+    const issuerDid = await prisma.did.findUnique({
+      where: {
+        ownerType_ownerId: {
+          ownerType: DidOwnerType.ORGANIZATION,
+          ownerId: universityId,
+        },
+      },
+      select: {
+        id: true,
+        currentKeyVersion: true,
+      },
+    });
+
+    if (!issuerDid) {
+      throw new Error('Issuer DID fixture is unavailable');
+    }
+
+    const activeBefore = await prisma.didKey.count({
+      where: {
+        didId: issuerDid.id,
+        status: DidKeyStatus.ACTIVE,
+      },
+    });
+
+    expect(activeBefore).toBe(1);
+
+    const conflictingVersion = issuerDid.currentKeyVersion + 10_000;
+
+    await expect(
+      prisma.didKey.create({
+        data: {
+          didId: issuerDid.id,
+          version: conflictingVersion,
+          publicKey: 'database-invariant-test-public-key',
+          encryptedPrivateKey: 'database-invariant-test-ciphertext',
+          iv: 'database-invariant-test-iv',
+          authTag: 'database-invariant-test-auth-tag',
+          encryptionKeyId: null,
+          algorithm: 'Ed25519',
+          status: DidKeyStatus.ACTIVE,
+        },
+      }),
+    ).rejects.toThrow();
+
+    const activeAfter = await prisma.didKey.count({
+      where: {
+        didId: issuerDid.id,
+        status: DidKeyStatus.ACTIVE,
+      },
+    });
+
+    expect(activeAfter).toBe(1);
+
+    const conflictingKey = await prisma.didKey.findUnique({
+      where: {
+        didId_version: {
+          didId: issuerDid.id,
+          version: conflictingVersion,
+        },
+      },
+    });
+
+    expect(conflictingKey).toBeNull();
+  });
+
+  it('allows only one of two concurrent credential revocations to win', async () => {
+    const issued = await issueCredential();
+
+    const revoke = () =>
+      request(httpServer)
+        .post(`/api/v1/credentials/${issued.credential.id}/revoke`)
+        .set('Authorization', `Bearer ${issuerAuth.accessToken}`)
+        .send({
+          reason: 'E2E concurrent revocation test',
+        });
+
+    const [firstResponse, secondResponse] = await Promise.all([
+      revoke(),
+      revoke(),
+    ]);
+
+    expect(
+      [firstResponse.status, secondResponse.status].sort((a, b) => a - b),
+    ).toEqual([201, 409]);
+
+    const credential = await prisma.credential.findUnique({
+      where: {
+        id: issued.credential.id,
+      },
+      select: {
+        status: true,
+      },
+    });
+
+    expect(credential?.status).toBe(CredentialStatus.REVOKED);
+
+    const revocationHistoryCount = await prisma.credentialStatusHistory.count({
+      where: {
+        credentialId: issued.credential.id,
+        newStatus: CredentialStatus.REVOKED,
+      },
+    });
+
+    expect(revocationHistoryCount).toBe(1);
+
+    const revocationAuditCount = await prisma.auditLog.count({
+      where: {
+        resourceId: issued.credential.id,
+        action: 'CREDENTIAL_REVOKED',
+        createdAt: {
+          gte: suiteStartedAt,
+        },
+      },
+    });
+
+    expect(revocationAuditCount).toBe(1);
+  });
+
+  it('allows only one of two concurrent verification finalizations to win', async () => {
+    const issued = await issueCredential();
+    const flow = await createPresentation(issued.credential.id);
+
+    const verify = () =>
+      request(httpServer)
+        .post(
+          `/api/v1/verification/presentations/${flow.presentationId}/verify`,
+        )
+        .set('Authorization', `Bearer ${verifierAuth.accessToken}`);
+
+    const [firstResponse, secondResponse] = await Promise.all([
+      verify(),
+      verify(),
+    ]);
+
+    expect(
+      [firstResponse.status, secondResponse.status].sort((a, b) => a - b),
+    ).toEqual([201, 409]);
+
+    const verificationResultCount = await prisma.verificationResult.count({
+      where: {
+        presentationId: flow.presentationId,
+      },
+    });
+
+    expect(verificationResultCount).toBe(1);
+
+    const requestState = await prisma.verificationRequest.findUnique({
+      where: {
+        id: flow.requestId,
+      },
+      select: {
+        status: true,
+      },
+    });
+
+    expect(requestState?.status).toBe(VerificationRequestStatus.VERIFIED);
+
+    const applicationState = await prisma.application.findUnique({
+      where: {
+        id: flow.applicationId,
+      },
+      select: {
+        educationVerificationStatus: true,
+      },
+    });
+
+    expect(applicationState?.educationVerificationStatus).toBe(
+      EducationVerificationStatus.VERIFIED,
+    );
+
+    const verificationAuditCount = await prisma.auditLog.count({
+      where: {
+        resourceId: flow.presentationId,
+        action: 'CREDENTIAL_VERIFIED',
+        createdAt: {
+          gte: suiteStartedAt,
+        },
+      },
+    });
+
+    expect(verificationAuditCount).toBe(1);
   });
 
   it('preserves legacy ciphertext and supports versioned encryption-key rotation', async () => {
