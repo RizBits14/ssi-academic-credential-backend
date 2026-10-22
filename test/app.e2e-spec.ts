@@ -1,11 +1,24 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
+import type { ConfigService } from '@nestjs/config';
 import { afterAll, beforeAll, describe, expect, it } from '@jest/globals';
 import { Test, TestingModule } from '@nestjs/testing';
-import { createHash, randomUUID } from 'node:crypto';
+import {
+  createCipheriv,
+  createHash,
+  randomBytes,
+  randomUUID,
+} from 'node:crypto';
 import type { Server } from 'node:http';
 import request from 'supertest';
 
+import { AcademicRecordsService } from '../src/academic-records/academic-records.service';
 import { AppModule } from '../src/app.module';
+import { CredentialSchemasService } from '../src/credential-schemas/credential-schemas.service';
+import { CredentialIssuanceService } from '../src/credentials/credential-issuance.service';
+import { CredentialsService } from '../src/credentials/credentials.service';
+import { EncryptionService } from '../src/crypto/encryption.service';
+import { HashingService } from '../src/crypto/hashing.service';
+import { SignatureService } from '../src/crypto/signature.service';
 import { DidService } from '../src/did/did.service';
 import type { Prisma } from '../src/generated/prisma/client';
 import {
@@ -14,9 +27,11 @@ import {
   DidOwnerType,
   EducationVerificationStatus,
   TrustedIssuerStatus,
+  UserRole,
   VerificationFinalResult,
   VerificationRequestStatus,
 } from '../src/generated/prisma/enums';
+import { OrganizationsService } from '../src/organizations/organizations.service';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { RedisService } from '../src/redis/redis.service';
 
@@ -159,6 +174,33 @@ function canonicalize(value: unknown): string {
   return JSON.stringify(sortValue(value));
 }
 
+function encryptLegacy(
+  plaintext: string,
+  masterKeyHex: string,
+): {
+  ciphertext: string;
+  iv: string;
+  authTag: string;
+} {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv(
+    'aes-256-gcm',
+    Buffer.from(masterKeyHex, 'hex'),
+    iv,
+  );
+
+  const ciphertext = Buffer.concat([
+    cipher.update(plaintext, 'utf8'),
+    cipher.final(),
+  ]);
+
+  return {
+    ciphertext: ciphertext.toString('base64'),
+    iv: iv.toString('base64'),
+    authTag: cipher.getAuthTag().toString('base64'),
+  };
+}
+
 function sortValue(value: unknown): unknown {
   if (Array.isArray(value)) {
     return value.map((item) => sortValue(item));
@@ -185,6 +227,7 @@ describe('SSI Academic Credential API (e2e)', () => {
   let prisma: PrismaService;
   let redis: RedisService;
   let didService: DidService;
+  let encryptionService: EncryptionService;
 
   let seedPassword: string;
 
@@ -360,6 +403,7 @@ describe('SSI Academic Credential API (e2e)', () => {
     prisma = app.get(PrismaService);
     redis = app.get(RedisService);
     didService = app.get(DidService);
+    encryptionService = app.get(EncryptionService);
 
     seedPassword = process.env.SEED_DEFAULT_PASSWORD ?? '';
 
@@ -1932,6 +1976,443 @@ describe('SSI Academic Credential API (e2e)', () => {
           });
         });
       }
+    }
+  });
+
+  it('preserves legacy ciphertext and supports versioned encryption-key rotation', async () => {
+    const requireEnvironmentValue = (name: string): string => {
+      const value = process.env[name];
+
+      if (!value) {
+        throw new Error(`${name} is required for the crypto E2E test`);
+      }
+
+      return value;
+    };
+
+    const masterKeyHex = requireEnvironmentValue('MASTER_ENCRYPTION_KEY');
+
+    const didActiveKeyId = requireEnvironmentValue(
+      'DID_ENCRYPTION_ACTIVE_KEY_ID',
+    )
+      .trim()
+      .toLowerCase();
+
+    const walletActiveKeyId = requireEnvironmentValue(
+      'WALLET_ENCRYPTION_ACTIVE_KEY_ID',
+    )
+      .trim()
+      .toLowerCase();
+
+    const didActiveEnvironmentKey = `DID_ENCRYPTION_KEY_${didActiveKeyId.toUpperCase()}`;
+
+    const walletActiveEnvironmentKey = `WALLET_ENCRYPTION_KEY_${walletActiveKeyId.toUpperCase()}`;
+
+    const didActiveKeyHex = requireEnvironmentValue(didActiveEnvironmentKey);
+
+    const walletActiveKeyHex = requireEnvironmentValue(
+      walletActiveEnvironmentKey,
+    );
+
+    expect(didActiveKeyHex).not.toBe(walletActiveKeyHex);
+
+    const temporaryDidKeyId = `e2e_${runId}_did`;
+    const temporaryWalletKeyId = `e2e_${runId}_wallet`;
+
+    const temporaryDidEnvironmentKey = `DID_ENCRYPTION_KEY_${temporaryDidKeyId.toUpperCase()}`;
+
+    const temporaryWalletEnvironmentKey = `WALLET_ENCRYPTION_KEY_${temporaryWalletKeyId.toUpperCase()}`;
+
+    const temporaryDidKeyHex = randomBytes(32).toString('hex');
+    const temporaryWalletKeyHex = randomBytes(32).toString('hex');
+
+    expect(temporaryDidKeyHex).not.toBe(temporaryWalletKeyHex);
+
+    process.env[temporaryDidEnvironmentKey] = temporaryDidKeyHex;
+    process.env[temporaryWalletEnvironmentKey] = temporaryWalletKeyHex;
+
+    let temporaryHolderId: string | null = null;
+    let temporaryDidId: string | null = null;
+
+    try {
+      const temporaryHolder = await prisma.user.create({
+        data: {
+          name: 'E2E Crypto Holder',
+          email: `e2e.crypto.${runId}@example.com`,
+          passwordHash: 'not-used-by-e2e',
+          role: UserRole.HOLDER,
+        },
+        select: {
+          id: true,
+        },
+      });
+
+      temporaryHolderId = temporaryHolder.id;
+
+      const temporaryDid = await didService.createForUser(temporaryHolder.id);
+
+      temporaryDidId = temporaryDid.id;
+
+      const didRecord = await prisma.did.findUnique({
+        where: {
+          id: temporaryDid.id,
+        },
+        select: {
+          currentKeyVersion: true,
+        },
+      });
+
+      if (!didRecord) {
+        throw new Error('Temporary DID fixture is unavailable');
+      }
+
+      const initialDidKey = await prisma.didKey.findUnique({
+        where: {
+          didId_version: {
+            didId: temporaryDid.id,
+            version: didRecord.currentKeyVersion,
+          },
+        },
+      });
+
+      if (!initialDidKey) {
+        throw new Error('Temporary DID key fixture is unavailable');
+      }
+
+      expect(initialDidKey.encryptionKeyId).toBe(didActiveKeyId);
+
+      const privateKeyPlaintext = encryptionService.decryptForDid({
+        ciphertext: initialDidKey.encryptedPrivateKey,
+        iv: initialDidKey.iv,
+        authTag: initialDidKey.authTag,
+        keyId: initialDidKey.encryptionKeyId,
+      });
+
+      const legacyDidCiphertext = encryptLegacy(
+        privateKeyPlaintext,
+        masterKeyHex,
+      );
+
+      await prisma.didKey.update({
+        where: {
+          id: initialDidKey.id,
+        },
+        data: {
+          encryptedPrivateKey: legacyDidCiphertext.ciphertext,
+          iv: legacyDidCiphertext.iv,
+          authTag: legacyDidCiphertext.authTag,
+          encryptionKeyId: null,
+        },
+      });
+
+      try {
+        const signatureService = app.get(SignatureService);
+        const legacySigningPayload = `legacy-did-${runId}`;
+
+        const legacySignature = await didService.signForUser(
+          temporaryHolder.id,
+          legacySigningPayload,
+        );
+
+        expect(
+          signatureService.verify(
+            legacySigningPayload,
+            legacySignature.signature,
+            initialDidKey.publicKey,
+          ),
+        ).toBe(true);
+      } finally {
+        await prisma.didKey.update({
+          where: {
+            id: initialDidKey.id,
+          },
+          data: {
+            encryptedPrivateKey: initialDidKey.encryptedPrivateKey,
+            iv: initialDidKey.iv,
+            authTag: initialDidKey.authTag,
+            encryptionKeyId: initialDidKey.encryptionKeyId,
+          },
+        });
+      }
+
+      const legacyWalletCredential = await issueCredential();
+
+      const initialWalletRow = await prisma.walletCredential.findUnique({
+        where: {
+          id: legacyWalletCredential.walletCredentialId,
+        },
+      });
+
+      if (!initialWalletRow) {
+        throw new Error('Wallet credential fixture is unavailable');
+      }
+
+      expect(initialWalletRow.encryptionKeyId).toBe(walletActiveKeyId);
+
+      const walletPlaintext = encryptionService.decryptForWallet({
+        ciphertext: initialWalletRow.ciphertext,
+        iv: initialWalletRow.iv,
+        authTag: initialWalletRow.authTag,
+        keyId: initialWalletRow.encryptionKeyId,
+      });
+
+      const expectedWalletDocument = asRecord(
+        JSON.parse(walletPlaintext) as unknown,
+      );
+
+      const legacyWalletCiphertext = encryptLegacy(
+        walletPlaintext,
+        masterKeyHex,
+      );
+
+      await prisma.walletCredential.update({
+        where: {
+          id: initialWalletRow.id,
+        },
+        data: {
+          ciphertext: legacyWalletCiphertext.ciphertext,
+          iv: legacyWalletCiphertext.iv,
+          authTag: legacyWalletCiphertext.authTag,
+          encryptionKeyId: null,
+        },
+      });
+
+      try {
+        const legacyWalletDocument = await getWalletCredentialDocument(
+          initialWalletRow.id,
+        );
+
+        expect(legacyWalletDocument).toEqual(expectedWalletDocument);
+      } finally {
+        await prisma.walletCredential.update({
+          where: {
+            id: initialWalletRow.id,
+          },
+          data: {
+            ciphertext: initialWalletRow.ciphertext,
+            iv: initialWalletRow.iv,
+            authTag: initialWalletRow.authTag,
+            encryptionKeyId: initialWalletRow.encryptionKeyId,
+          },
+        });
+      }
+
+      const issuerDid = await prisma.did.findUnique({
+        where: {
+          ownerType_ownerId: {
+            ownerType: DidOwnerType.ORGANIZATION,
+            ownerId: universityId,
+          },
+        },
+        select: {
+          id: true,
+          currentKeyVersion: true,
+        },
+      });
+
+      if (!issuerDid) {
+        throw new Error('Issuer DID fixture is unavailable');
+      }
+
+      const issuerDidKey = await prisma.didKey.findUnique({
+        where: {
+          didId_version: {
+            didId: issuerDid.id,
+            version: issuerDid.currentKeyVersion,
+          },
+        },
+        select: {
+          encryptionKeyId: true,
+        },
+      });
+
+      if (!issuerDidKey) {
+        throw new Error('Issuer DID key fixture is unavailable');
+      }
+
+      const rotatedConfigValues: Record<string, string> = {
+        MASTER_ENCRYPTION_KEY: masterKeyHex,
+        DID_ENCRYPTION_ACTIVE_KEY_ID: temporaryDidKeyId,
+        WALLET_ENCRYPTION_ACTIVE_KEY_ID: temporaryWalletKeyId,
+        [didActiveEnvironmentKey]: didActiveKeyHex,
+        [walletActiveEnvironmentKey]: walletActiveKeyHex,
+        [temporaryDidEnvironmentKey]: temporaryDidKeyHex,
+        [temporaryWalletEnvironmentKey]: temporaryWalletKeyHex,
+      };
+
+      if (issuerDidKey.encryptionKeyId) {
+        const issuerKeyEnvironmentName = `DID_ENCRYPTION_KEY_${issuerDidKey.encryptionKeyId.toUpperCase()}`;
+
+        rotatedConfigValues[issuerKeyEnvironmentName] = requireEnvironmentValue(
+          issuerKeyEnvironmentName,
+        );
+      }
+
+      const rotatedConfigService = {
+        getOrThrow: <T>(key: string): T => {
+          const value = rotatedConfigValues[key];
+
+          if (!value) {
+            throw new Error(`Missing rotated crypto configuration: ${key}`);
+          }
+
+          return value as T;
+        },
+      } as ConfigService;
+
+      const rotatedEncryptionService = new EncryptionService(
+        rotatedConfigService,
+      );
+
+      expect(
+        rotatedEncryptionService.decryptForDid({
+          ciphertext: initialDidKey.encryptedPrivateKey,
+          iv: initialDidKey.iv,
+          authTag: initialDidKey.authTag,
+          keyId: initialDidKey.encryptionKeyId,
+        }),
+      ).toBe(privateKeyPlaintext);
+
+      expect(
+        rotatedEncryptionService.decryptForWallet({
+          ciphertext: initialWalletRow.ciphertext,
+          iv: initialWalletRow.iv,
+          authTag: initialWalletRow.authTag,
+          keyId: initialWalletRow.encryptionKeyId,
+        }),
+      ).toBe(walletPlaintext);
+
+      const signatureService = app.get(SignatureService);
+
+      const rotatedDidService = new DidService(
+        prisma,
+        rotatedEncryptionService,
+        signatureService,
+      );
+
+      const rotatedDid = await rotatedDidService.rotateForUser(
+        temporaryHolder.id,
+      );
+
+      const rotatedDidKey = await prisma.didKey.findUnique({
+        where: {
+          didId_version: {
+            didId: temporaryDid.id,
+            version: rotatedDid.keyVersion,
+          },
+        },
+      });
+
+      if (!rotatedDidKey) {
+        throw new Error('Rotated DID key was not persisted');
+      }
+
+      expect(rotatedDidKey.encryptionKeyId).toBe(temporaryDidKeyId);
+
+      const rotatedSigningPayload = `rotated-did-${runId}`;
+
+      const rotatedSignature = await didService.signForUser(
+        temporaryHolder.id,
+        rotatedSigningPayload,
+      );
+
+      expect(
+        signatureService.verify(
+          rotatedSigningPayload,
+          rotatedSignature.signature,
+          rotatedDidKey.publicKey,
+        ),
+      ).toBe(true);
+
+      const rotatedCredentialsService = new CredentialsService(
+        app.get(HashingService),
+        rotatedDidService,
+        rotatedEncryptionService,
+      );
+
+      const rotatedIssuanceService = new CredentialIssuanceService(
+        app.get(AcademicRecordsService),
+        app.get(CredentialSchemasService),
+        app.get(OrganizationsService),
+        rotatedDidService,
+        rotatedCredentialsService,
+        prisma,
+      );
+
+      const versionTwoIssued = await rotatedIssuanceService.issue({
+        issuerOrganizationId: universityId,
+        academicRecordId,
+        schemaId: credentialSchemaId,
+        actorId: issuerAdminId,
+      });
+
+      createdCredentialIds.push(versionTwoIssued.credential.id);
+      createdWalletCredentialIds.push(versionTwoIssued.walletCredentialId);
+
+      const versionTwoWalletRow = await prisma.walletCredential.findUnique({
+        where: {
+          id: versionTwoIssued.walletCredentialId,
+        },
+      });
+
+      if (!versionTwoWalletRow) {
+        throw new Error('Versioned wallet credential was not persisted');
+      }
+
+      expect(versionTwoWalletRow.encryptionKeyId).toBe(temporaryWalletKeyId);
+
+      const versionTwoWalletDocument = await getWalletCredentialDocument(
+        versionTwoIssued.walletCredentialId,
+      );
+
+      expect(versionTwoWalletDocument).toEqual(
+        versionTwoIssued.signedCredential,
+      );
+    } finally {
+      if (temporaryDidId || temporaryHolderId) {
+        await prisma.auditLog.deleteMany({
+          where: {
+            createdAt: {
+              gte: suiteStartedAt,
+            },
+            OR: [
+              ...(temporaryHolderId
+                ? [
+                    {
+                      actorId: temporaryHolderId,
+                    },
+                  ]
+                : []),
+              ...(temporaryDidId
+                ? [
+                    {
+                      resourceId: temporaryDidId,
+                    },
+                  ]
+                : []),
+            ],
+          },
+        });
+      }
+
+      if (temporaryDidId) {
+        await prisma.did.deleteMany({
+          where: {
+            id: temporaryDidId,
+          },
+        });
+      }
+
+      if (temporaryHolderId) {
+        await prisma.user.deleteMany({
+          where: {
+            id: temporaryHolderId,
+          },
+        });
+      }
+
+      delete process.env[temporaryDidEnvironmentKey];
+      delete process.env[temporaryWalletEnvironmentKey];
     }
   });
 
