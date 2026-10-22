@@ -4,13 +4,14 @@ import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { randomUUID } from 'node:crypto';
 import { LoggerModule } from 'nestjs-pino';
-import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
-import { ApiResponseInterceptor } from './common/interceptors/api-response.interceptor';
 
 import { AcademicRecordsModule } from './academic-records/academic-records.module';
 import { ApplicationsModule } from './applications/applications.module';
 import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
+import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
+import { ApiResponseInterceptor } from './common/interceptors/api-response.interceptor';
+import { validateEnvironment } from './config/environment.validation';
 import { CredentialSchemasModule } from './credential-schemas/credential-schemas.module';
 import { CredentialsModule } from './credentials/credentials.module';
 import { CryptoModule } from './crypto/crypto.module';
@@ -30,6 +31,8 @@ import { WalletModule } from './wallet/wallet.module';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
+      cache: true,
+      validate: validateEnvironment,
     }),
 
     LoggerModule.forRoot({
