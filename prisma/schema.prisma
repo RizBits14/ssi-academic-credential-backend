@@ -3,6 +3,7 @@ generator client {
   output              = "../src/generated/prisma"
   moduleFormat        = "cjs"
   importFileExtension = ""
+  previewFeatures = ["partialIndexes"]
 }
 
 datasource db {
@@ -216,9 +217,12 @@ model DidKey {
 
   createdAt DateTime @default(now())
 
+  @@unique([didId], map: "DidKey_one_active_key_per_did_key", where: { status: "ACTIVE" })
+
   @@unique([didId, version])
   @@index([didId, status])
   @@index([encryptionKeyId])
+  
 }
 
 model AcademicRecord {
