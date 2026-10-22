@@ -12,15 +12,21 @@ import { RedisService } from './redis.service';
       provide: REDIS_CLIENT,
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => {
-        const redisUrl = configService.get<string>('REDIS_URL');
+        const redisUrl = configService.getOrThrow<string>('REDIS_URL');
+        const nodeEnv = configService.getOrThrow<string>('NODE_ENV');
 
-        if (!redisUrl) {
-          throw new Error('REDIS_URL is not configured');
+        if (
+          nodeEnv === 'production' &&
+          !redisUrl.toLowerCase().startsWith('rediss://')
+        ) {
+          throw new Error('REDIS_URL must use rediss:// in production');
         }
 
         return new Redis(redisUrl, {
           lazyConnect: true,
           maxRetriesPerRequest: 1,
+          connectTimeout: 5_000,
+          enableReadyCheck: true,
         });
       },
     },

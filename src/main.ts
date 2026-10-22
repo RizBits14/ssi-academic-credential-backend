@@ -17,7 +17,16 @@ async function bootstrap() {
 
   const configService = app.get(ConfigService);
 
-  const port = configService.get<number>('PORT', 3000);
+  const nodeEnv = configService.getOrThrow<string>('NODE_ENV');
+  const port = configService.getOrThrow<number>('PORT');
+  const corsOrigin = configService.getOrThrow<string>('CORS_ORIGIN');
+  const swaggerEnabled = configService.getOrThrow<boolean>('SWAGGER_ENABLED');
+
+  app.disable('x-powered-by');
+
+  if (nodeEnv === 'production') {
+    app.set('trust proxy', 1);
+  }
 
   app.setGlobalPrefix('api/v1');
 
@@ -25,11 +34,6 @@ async function bootstrap() {
     helmet({
       contentSecurityPolicy: false,
     }),
-  );
-
-  const corsOrigin = configService.get<string>(
-    'CORS_ORIGIN',
-    'http://localhost:3000',
   );
 
   const allowedOrigins = corsOrigin
@@ -60,10 +64,6 @@ async function bootstrap() {
       transform: true,
     }),
   );
-
-  const swaggerEnabled =
-    configService.get<string>('SWAGGER_ENABLED', 'true').toLowerCase() !==
-    'false';
 
   if (swaggerEnabled) {
     const swaggerConfig = new DocumentBuilder()
