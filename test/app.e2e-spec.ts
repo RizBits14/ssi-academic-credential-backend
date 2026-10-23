@@ -834,20 +834,48 @@ describe('SSI Academic Credential API (e2e)', () => {
     }
   });
 
-  it('reports healthy database and Redis dependencies', async () => {
-    const response = await request(httpServer)
+  it('reports API liveness and dependency readiness', async () => {
+    const livenessResponse = await request(httpServer)
+      .get('/api/v1/health/live')
+      .expect(200);
+
+    const livenessBody = livenessResponse.body as {
+      status: string;
+      timestamp: string;
+    };
+
+    expect(livenessBody.status).toBe('ok');
+    expect(livenessBody.timestamp).toEqual(expect.any(String));
+
+    const readinessResponse = await request(httpServer)
+      .get('/api/v1/health/ready')
+      .expect(200);
+
+    const readinessBody = readinessResponse.body as {
+      status: string;
+      database: string;
+      redis: string;
+      timestamp: string;
+    };
+
+    expect(readinessBody.status).toBe('ok');
+    expect(readinessBody.database).toBe('connected');
+    expect(readinessBody.redis).toBe('connected');
+    expect(readinessBody.timestamp).toEqual(expect.any(String));
+
+    const legacyResponse = await request(httpServer)
       .get('/api/v1/health')
       .expect(200);
 
-    const body = response.body as {
+    const legacyBody = legacyResponse.body as {
       status: string;
       database: string;
       redis: string;
     };
 
-    expect(body.status).toBe('ok');
-    expect(body.database).toBe('connected');
-    expect(body.redis).toBe('connected');
+    expect(legacyBody.status).toBe('ok');
+    expect(legacyBody.database).toBe('connected');
+    expect(legacyBody.redis).toBe('connected');
   });
 
   it('enforces authentication and role-based access control', async () => {
