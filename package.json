@@ -6,7 +6,7 @@
   "private": true,
   "license": "UNLICENSED",
   "scripts": {
-    "build": "nest build",
+    "build": "prisma generate && nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\" \"prisma/**/*.ts\" \"prisma.config.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\" \"prisma/**/*.ts\" \"prisma.config.ts\"",
     "start": "nest start",
@@ -22,12 +22,12 @@
     "test:e2e": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --config ./test/jest-e2e.json",
     "prisma:generate": "prisma generate",
     "db:migrate": "prisma migrate deploy",
-    "db:seed": "tsx prisma/seed.ts",
-    "setup:dids": "tsx prisma/create-initial-dids.ts",
-    "db:setup": "npm run prisma:generate && npm run db:migrate && npm run db:seed && npm run setup:dids",
+    "db:seed": "tsx prisma/ensure-non-production.ts db:seed && tsx prisma/seed.ts",
+    "setup:dids": "tsx prisma/ensure-non-production.ts setup:dids && tsx prisma/create-initial-dids.ts",
+    "db:setup": "tsx prisma/ensure-non-production.ts db:setup && npm run prisma:generate && npm run db:migrate && npm run db:seed && npm run setup:dids",
     "verify": "npm run format:check && npm run build && npm run lint:check && npm test && npm run test:e2e",
-    "db:clean": "tsx prisma/clean-database.ts",
-    "db:clean:seed": "npm run db:clean && npm run db:seed && npm run setup:dids"
+    "db:clean": "tsx prisma/ensure-non-production.ts db:clean && tsx prisma/clean-database.ts",
+    "db:clean:seed": "tsx prisma/ensure-non-production.ts db:clean:seed && npm run db:clean && npm run db:seed && npm run setup:dids"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",
