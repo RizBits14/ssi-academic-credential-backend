@@ -93,6 +93,12 @@ function isLocalHostname(hostname: string): boolean {
   );
 }
 
+function isPrismaPostgresHostname(hostname: string): boolean {
+  const normalized = hostname.toLowerCase();
+
+  return normalized === 'pooled.db.prisma.io' || normalized === 'db.prisma.io';
+}
+
 function validatePostgresUrl(value: string, name: string): void {
   let parsed: URL;
 
@@ -110,14 +116,26 @@ function validatePostgresUrl(value: string, name: string): void {
     throw new Error(`${name} must include a database hostname`);
   }
 
-  if (!isLocalHostname(parsed.hostname)) {
-    const sslMode = parsed.searchParams.get('sslmode')?.toLowerCase();
+  if (isLocalHostname(parsed.hostname)) {
+    return;
+  }
 
-    if (sslMode !== 'verify-full') {
+  const sslMode = parsed.searchParams.get('sslmode')?.toLowerCase();
+
+  if (isPrismaPostgresHostname(parsed.hostname)) {
+    if (sslMode !== 'require' && sslMode !== 'verify-full') {
       throw new Error(
-        `${name} for a remote PostgreSQL server must use sslmode=verify-full`,
+        `${name} for Prisma Postgres must use sslmode=require or sslmode=verify-full`,
       );
     }
+
+    return;
+  }
+
+  if (sslMode !== 'verify-full') {
+    throw new Error(
+      `${name} for a remote PostgreSQL server must use sslmode=verify-full`,
+    );
   }
 }
 

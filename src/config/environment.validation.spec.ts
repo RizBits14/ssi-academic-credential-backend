@@ -43,7 +43,53 @@ describe('validateEnvironment', () => {
     expect(result.WALLET_ENCRYPTION_ACTIVE_KEY_ID).toBe('v1');
   });
 
-  it('rejects a remote PostgreSQL URL without verify-full', () => {
+  it('accepts a pooled Prisma Postgres URL using sslmode=require', () => {
+    expect(() =>
+      validateEnvironment(
+        validConfig({
+          DATABASE_URL:
+            'postgresql://user:password@pooled.db.prisma.io:5432/postgres?sslmode=require',
+        }),
+      ),
+    ).not.toThrow();
+  });
+
+  it('accepts a direct Prisma Postgres URL using sslmode=require', () => {
+    expect(() =>
+      validateEnvironment(
+        validConfig({
+          DATABASE_URL:
+            'postgresql://user:password@db.prisma.io:5432/postgres?sslmode=require',
+        }),
+      ),
+    ).not.toThrow();
+  });
+
+  it('accepts Prisma Postgres using sslmode=verify-full', () => {
+    expect(() =>
+      validateEnvironment(
+        validConfig({
+          DATABASE_URL:
+            'postgresql://user:password@pooled.db.prisma.io:5432/postgres?sslmode=verify-full',
+        }),
+      ),
+    ).not.toThrow();
+  });
+
+  it('rejects a Prisma Postgres URL without an approved SSL mode', () => {
+    expect(() =>
+      validateEnvironment(
+        validConfig({
+          DATABASE_URL:
+            'postgresql://user:password@pooled.db.prisma.io:5432/postgres?sslmode=disable',
+        }),
+      ),
+    ).toThrow(
+      'DATABASE_URL for Prisma Postgres must use sslmode=require or sslmode=verify-full',
+    );
+  });
+
+  it('rejects a remote non-Prisma PostgreSQL URL without verify-full', () => {
     expect(() =>
       validateEnvironment(
         validConfig({
