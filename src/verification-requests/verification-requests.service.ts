@@ -12,6 +12,7 @@ import { EncryptionService } from '../crypto/encryption.service';
 import { DidService } from '../did/did.service';
 import type { Prisma } from '../generated/prisma/client';
 import {
+  DidOwnerType,
   EducationVerificationStatus,
   VerificationRequestStatus,
 } from '../generated/prisma/enums';
@@ -38,6 +39,16 @@ interface VerificationSession {
   bankId: string;
   nonce: string;
   requestedClaims: string[];
+}
+
+interface HolderDataIntegrityProofOptions {
+  type: 'DataIntegrityProof';
+  cryptosuite: 'eddsa-jcs-2022';
+  created: string;
+  verificationMethod: string;
+  proofPurpose: 'authentication';
+  challenge: string;
+  domain: string;
 }
 
 @Injectable()
@@ -291,31 +302,17 @@ export class VerificationRequestsService {
 
     const presentationId = randomUUID();
 
-    const signingPayload = {
-      presentationId,
-      requestId: request.id,
-      nonce: session.nonce,
-      credentialId: input.credentialId,
-      disclosedClaims,
-    };
-
-    const canonicalPayload = this.canonicalize(signingPayload);
-
-    const presentationHash = createHash('sha256')
-      .update(canonicalPayload)
-      .digest('hex');
-
-    const holderSignature = await this.didService.signForUser(
-      input.holderId,
-      canonicalPayload,
-    );
-
-    const holderProof: Prisma.InputJsonObject = {
-      algorithm: 'Ed25519',
-      verificationMethod:
-        `${holderSignature.did}` + `#key-${holderSignature.keyVersion}`,
-      signature: holderSignature.signature,
-    };
+    const { holderDid, presentationHash, holderProof } =
+      await this.createHolderDataIntegrityProof({
+        presentationId,
+        requestId: request.id,
+        credentialId: input.credentialId,
+        holderId: input.holderId,
+        bankId: session.bankId,
+        challenge: session.nonce,
+        disclosedClaims,
+        createdAt: new Date(),
+      });
 
     const presentation = await this.prisma.$transaction(async (transaction) => {
       const transition = await transaction.verificationRequest.updateMany({
@@ -344,7 +341,7 @@ export class VerificationRequestsService {
           requestId: request.id,
           credentialId: input.credentialId,
           holderId: input.holderId,
-          holderDid: holderSignature.did,
+          holderDid,
           disclosedClaims,
           nonce: session.nonce,
           presentationHash,
@@ -507,6 +504,160 @@ export class VerificationRequestsService {
     });
 
     await this.redis.delete(`verification-request:${requestId}`);
+  }
+
+  private async createHolderDataIntegrityProof(input: {
+    presentationId: string;
+    requestId: string;
+    credentialId: string;
+    holderId: string;
+    bankId: string;
+    challenge: string;
+    disclosedClaims: Prisma.InputJsonObject;
+    createdAt: Date;
+  }): Promise<{
+    holderDid: string;
+    presentationHash: string;
+    holderProof: Prisma.InputJsonObject;
+  }> {
+    const maximumSigningAttempts = 3;
+
+    for (let attempt = 1; attempt <= maximumSigningAttempts; attempt += 1) {
+      const didRecord = await this.didService.findPublicByOwner(
+        DidOwnerType.USER,
+        input.holderId,
+      );
+
+      if (!didRecord) {
+        throw new NotFoundException('Holder DID not found');
+      }
+
+      const verificationMethod = `${didRecord.did}#key-${didRecord.currentKeyVersion}`;
+
+      const unsecuredPresentation = {
+        presentationId: input.presentationId,
+        requestId: input.requestId,
+        credentialId: input.credentialId,
+        holderDid: didRecord.did,
+        disclosedClaims: input.disclosedClaims,
+      };
+
+      const canonicalPresentation = this.canonicalize(unsecuredPresentation);
+
+      const presentationHash = createHash('sha256')
+        .update(canonicalPresentation, 'utf8')
+        .digest('hex');
+
+      const proofOptions: HolderDataIntegrityProofOptions = {
+        type: 'DataIntegrityProof',
+        cryptosuite: 'eddsa-jcs-2022',
+        created: input.createdAt.toISOString(),
+        verificationMethod,
+        proofPurpose: 'authentication',
+        challenge: input.challenge,
+        domain: input.bankId,
+      };
+
+      const hashData = this.createEddsaJcs2022HashData(
+        unsecuredPresentation,
+        proofOptions,
+      );
+
+      const signingResult = await this.didService.signForUser(
+        input.holderId,
+        hashData,
+      );
+
+      const actualVerificationMethod = `${signingResult.did}#key-${signingResult.keyVersion}`;
+
+      if (actualVerificationMethod !== verificationMethod) {
+        if (attempt < maximumSigningAttempts) {
+          continue;
+        }
+
+        throw new ConflictException(
+          'Holder DID key changed during presentation signing; retry approval',
+        );
+      }
+
+      return {
+        holderDid: didRecord.did,
+        presentationHash,
+        holderProof: {
+          ...proofOptions,
+          proofValue: this.signatureToMultibase(signingResult.signature),
+        },
+      };
+    }
+
+    throw new ConflictException(
+      'Unable to obtain a stable holder DID signing key',
+    );
+  }
+
+  private createEddsaJcs2022HashData(
+    unsecuredPresentation: Record<string, unknown>,
+    proofOptions: HolderDataIntegrityProofOptions,
+  ): Buffer {
+    const transformedDocument = this.canonicalize(unsecuredPresentation);
+
+    const canonicalProofConfig = this.canonicalize(proofOptions);
+
+    const transformedDocumentHash = createHash('sha256')
+      .update(transformedDocument, 'utf8')
+      .digest();
+
+    const proofConfigHash = createHash('sha256')
+      .update(canonicalProofConfig, 'utf8')
+      .digest();
+
+    return Buffer.concat([proofConfigHash, transformedDocumentHash]);
+  }
+
+  private signatureToMultibase(base64Signature: string): string {
+    const signatureBytes = Buffer.from(base64Signature, 'base64');
+
+    if (signatureBytes.length !== 64) {
+      throw new ConflictException('Ed25519 signature must be exactly 64 bytes');
+    }
+
+    return `z${this.encodeBase58(signatureBytes)}`;
+  }
+
+  private encodeBase58(value: Uint8Array): string {
+    const alphabet =
+      '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+
+    if (value.length === 0) {
+      return '';
+    }
+
+    let numericValue = 0n;
+
+    for (const byte of value) {
+      numericValue = numericValue * 256n + BigInt(byte);
+    }
+
+    let encoded = '';
+
+    while (numericValue > 0n) {
+      const remainder = Number(numericValue % 58n);
+
+      encoded = alphabet[remainder] + encoded;
+      numericValue /= 58n;
+    }
+
+    let leadingZeroCount = 0;
+
+    for (const byte of value) {
+      if (byte !== 0) {
+        break;
+      }
+
+      leadingZeroCount += 1;
+    }
+
+    return '1'.repeat(leadingZeroCount) + encoded;
   }
 
   private validateApprovedClaims(

@@ -175,6 +175,41 @@ function canonicalize(value: unknown): string {
   return canonicalizeJson(value);
 }
 
+function encodeBase58(value: Uint8Array): string {
+  const alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+
+  if (value.length === 0) {
+    return '';
+  }
+
+  let numericValue = 0n;
+
+  for (const byte of value) {
+    numericValue = numericValue * 256n + BigInt(byte);
+  }
+
+  let encoded = '';
+
+  while (numericValue > 0n) {
+    const remainder = Number(numericValue % 58n);
+
+    encoded = alphabet[remainder] + encoded;
+    numericValue /= 58n;
+  }
+
+  let leadingZeroCount = 0;
+
+  for (const byte of value) {
+    if (byte !== 0) {
+      break;
+    }
+
+    leadingZeroCount += 1;
+  }
+
+  return '1'.repeat(leadingZeroCount) + encoded;
+}
+
 function encryptLegacy(
   plaintext: string,
   masterKeyHex: string,
@@ -2628,24 +2663,78 @@ describe('SSI Academic Credential API (e2e)', () => {
       cgpa: 0.01,
     };
 
-    const holderSigningPayload = {
+    const existingHolderProof = asRecord(presentation.holderProof);
+
+    const created = existingHolderProof.created;
+    const verificationMethod = existingHolderProof.verificationMethod;
+    const challenge = existingHolderProof.challenge;
+    const domain = existingHolderProof.domain;
+
+    if (
+      existingHolderProof.type !== 'DataIntegrityProof' ||
+      existingHolderProof.cryptosuite !== 'eddsa-jcs-2022' ||
+      existingHolderProof.proofPurpose !== 'authentication' ||
+      typeof created !== 'string' ||
+      typeof verificationMethod !== 'string' ||
+      typeof challenge !== 'string' ||
+      typeof domain !== 'string'
+    ) {
+      throw new Error('Existing holder proof is invalid');
+    }
+
+    const unsecuredPresentation = {
       presentationId: presentation.id,
       requestId: presentation.requestId,
-      nonce: presentation.nonce,
       credentialId: presentation.credentialId,
+      holderDid: presentation.holderDid,
       disclosedClaims: tamperedClaims,
     };
 
-    const canonicalPayload = canonicalize(holderSigningPayload);
+    const canonicalPresentation = canonicalize(unsecuredPresentation);
+
+    const presentationHash = createHash('sha256')
+      .update(canonicalPresentation, 'utf8')
+      .digest('hex');
+
+    const holderProofOptions = {
+      type: 'DataIntegrityProof',
+      cryptosuite: 'eddsa-jcs-2022',
+      created,
+      verificationMethod,
+      proofPurpose: 'authentication',
+      challenge,
+      domain,
+    };
+
+    const proofConfigHash = createHash('sha256')
+      .update(canonicalize(holderProofOptions), 'utf8')
+      .digest();
+
+    const transformedPresentationHash = createHash('sha256')
+      .update(canonicalPresentation, 'utf8')
+      .digest();
+
+    const holderHashData = Buffer.concat([
+      proofConfigHash,
+      transformedPresentationHash,
+    ]);
 
     const holderSignature = await didService.signForUser(
       holderId,
-      canonicalPayload,
+      holderHashData,
     );
 
-    const presentationHash = createHash('sha256')
-      .update(canonicalPayload)
-      .digest('hex');
+    const actualVerificationMethod = `${holderSignature.did}#key-${holderSignature.keyVersion}`;
+
+    if (actualVerificationMethod !== verificationMethod) {
+      throw new Error('Holder DID key changed during tamper test');
+    }
+
+    const signatureBytes = Buffer.from(holderSignature.signature, 'base64');
+
+    if (signatureBytes.length !== 64) {
+      throw new Error('Holder Ed25519 signature must be 64 bytes');
+    }
 
     await prisma.presentation.update({
       where: {
@@ -2655,9 +2744,8 @@ describe('SSI Academic Credential API (e2e)', () => {
         disclosedClaims: tamperedClaims as Prisma.InputJsonObject,
         presentationHash,
         holderProof: {
-          algorithm: 'Ed25519',
-          verificationMethod: `${holderSignature.did}#key-${holderSignature.keyVersion}`,
-          signature: holderSignature.signature,
+          ...holderProofOptions,
+          proofValue: `z${encodeBase58(signatureBytes)}`,
         },
       },
     });

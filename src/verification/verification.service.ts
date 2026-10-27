@@ -198,23 +198,44 @@ export class VerificationService {
   async validateCryptographicChecks(presentationId: string) {
     const context = await this.validateRequestContext(presentationId);
 
-    const { presentation, request } = context;
+    const { presentation, request, session } = context;
 
     const holderProof = this.requireRecord(
       presentation.holderProof,
       'Holder proof is invalid',
     );
 
-    const holderSignature = holderProof.signature;
-
+    const holderProofValue = holderProof.proofValue;
     const holderVerificationMethod = holderProof.verificationMethod;
+    const holderChallenge = holderProof.challenge;
+    const holderDomain = holderProof.domain;
 
     if (
-      holderProof.algorithm !== 'Ed25519' ||
-      typeof holderSignature !== 'string' ||
-      typeof holderVerificationMethod !== 'string'
+      holderProof.type !== 'DataIntegrityProof' ||
+      holderProof.cryptosuite !== 'eddsa-jcs-2022' ||
+      holderProof.proofPurpose !== 'authentication' ||
+      typeof holderProofValue !== 'string' ||
+      typeof holderVerificationMethod !== 'string' ||
+      typeof holderChallenge !== 'string' ||
+      typeof holderDomain !== 'string'
     ) {
       throw new BadRequestException('Holder proof is invalid');
+    }
+
+    this.assertValidProofCreated(
+      holderProof.created,
+      'Holder proof is invalid',
+    );
+
+    if (
+      holderChallenge !== presentation.nonce ||
+      holderChallenge !== session.nonce
+    ) {
+      throw new BadRequestException('Holder proof challenge is invalid');
+    }
+
+    if (holderDomain !== session.bankId) {
+      throw new BadRequestException('Holder proof domain is invalid');
     }
 
     const holderDidDocument = await this.resolveProofVerificationMethod(
@@ -229,19 +250,53 @@ export class VerificationService {
       );
     }
 
-    const holderSigningPayload = {
+    const unsecuredPresentation = {
       presentationId: presentation.id,
       requestId: request.id,
-      nonce: presentation.nonce,
       credentialId: presentation.credentialId,
+      holderDid: presentation.holderDid,
       disclosedClaims: presentation.disclosedClaims,
     };
 
-    const canonicalHolderPayload = this.canonicalize(holderSigningPayload);
+    const canonicalPresentation = this.canonicalize(unsecuredPresentation);
+
+    const calculatedPresentationHash = createHash('sha256')
+      .update(canonicalPresentation, 'utf8')
+      .digest('hex');
+
+    if (calculatedPresentationHash !== presentation.presentationHash) {
+      throw new BadRequestException('Presentation hash is invalid');
+    }
+
+    const holderProofOptions: Record<string, unknown> = {
+      ...holderProof,
+    };
+
+    delete holderProofOptions.proofValue;
+
+    const holderProofBytes = this.decodeEddsaJcs2022ProofValue(
+      holderProofValue,
+      'Holder proof is invalid',
+    );
+
+    const canonicalHolderProofConfig = this.canonicalize(holderProofOptions);
+
+    const holderProofConfigHash = createHash('sha256')
+      .update(canonicalHolderProofConfig, 'utf8')
+      .digest();
+
+    const holderPresentationHash = createHash('sha256')
+      .update(canonicalPresentation, 'utf8')
+      .digest();
+
+    const holderHashData = Buffer.concat([
+      holderProofConfigHash,
+      holderPresentationHash,
+    ]);
 
     const holderProofValid = this.signatureService.verify(
-      canonicalHolderPayload,
-      holderSignature,
+      holderHashData,
+      holderProofBytes.toString('base64'),
       holderDidDocument.verificationMethod.publicKey,
     );
 
@@ -890,7 +945,8 @@ export class VerificationService {
 
     if (
       reason.includes('Holder proof') ||
-      reason.includes('Holder verification method')
+      reason.includes('Holder verification method') ||
+      reason.includes('Presentation hash')
     ) {
       return checks;
     }
@@ -987,13 +1043,16 @@ export class VerificationService {
     return firstSorted.every((value, index) => value === secondSorted[index]);
   }
 
-  private assertValidProofCreated(value: unknown): void {
+  private assertValidProofCreated(
+    value: unknown,
+    errorMessage = 'Issuer proof is invalid',
+  ): void {
     if (value === undefined) {
       return;
     }
 
     if (typeof value !== 'string' || Number.isNaN(Date.parse(value))) {
-      throw new BadRequestException('Issuer proof is invalid');
+      throw new BadRequestException(errorMessage);
     }
   }
 
@@ -1038,21 +1097,27 @@ export class VerificationService {
     unsignedCredential['@context'] = proofContext;
   }
 
-  private decodeEddsaJcs2022ProofValue(proofValue: string): Buffer {
+  private decodeEddsaJcs2022ProofValue(
+    proofValue: string,
+    errorMessage = 'Issuer proof is invalid',
+  ): Buffer {
     if (!proofValue.startsWith('z') || proofValue.length <= 1) {
-      throw new BadRequestException('Issuer proof is invalid');
+      throw new BadRequestException(errorMessage);
     }
 
-    const proofBytes = this.decodeBase58(proofValue.slice(1));
+    const proofBytes = this.decodeBase58(proofValue.slice(1), errorMessage);
 
     if (proofBytes.length !== 64) {
-      throw new BadRequestException('Issuer proof is invalid');
+      throw new BadRequestException(errorMessage);
     }
 
     return proofBytes;
   }
 
-  private decodeBase58(value: string): Buffer {
+  private decodeBase58(
+    value: string,
+    errorMessage = 'Issuer proof is invalid',
+  ): Buffer {
     const alphabet =
       '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
 
@@ -1066,7 +1131,7 @@ export class VerificationService {
       const digit = alphabet.indexOf(character);
 
       if (digit < 0) {
-        throw new BadRequestException('Issuer proof is invalid');
+        throw new BadRequestException(errorMessage);
       }
 
       numericValue = numericValue * 58n + BigInt(digit);

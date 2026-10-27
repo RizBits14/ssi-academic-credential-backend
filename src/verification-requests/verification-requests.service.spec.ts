@@ -1,16 +1,21 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
+import { createHash } from 'node:crypto';
 
-import { EncryptionService } from '../crypto/encryption.service';
-import { DidService } from '../did/did.service';
+import { canonicalizeJson } from '../common/utils/json-canonicalization.util';
 import {
+  DidOwnerType,
   EducationVerificationStatus,
   VerificationRequestStatus,
 } from '../generated/prisma/enums';
-import { PrismaService } from '../prisma/prisma.service';
-import { RedisService } from '../redis/redis.service';
 import { VerificationRequestsService } from './verification-requests.service';
 
 describe('VerificationRequestsService', () => {
+  const validHolderSignatureBase64 =
+    'AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQ==';
+
+  const validHolderProofValue =
+    'z2AXDGYSE4f2sz7tvMMzyHvUfcoJmxudvdhBcmiUSo6ijwfYmfZYsKRxboQMPh3R4kUhXRVdtSXFXMheka4Rc4P2';
+
   const transactionClient = {
     verificationRequest: {
       create: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
@@ -68,6 +73,8 @@ describe('VerificationRequestsService', () => {
   };
 
   const mockDidService = {
+    findPublicByOwner: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+
     signForUser: jest.fn<
       (...args: unknown[]) => Promise<{
         did: string;
@@ -83,10 +90,10 @@ describe('VerificationRequestsService', () => {
     jest.clearAllMocks();
 
     service = new VerificationRequestsService(
-      mockPrismaService as unknown as PrismaService,
-      mockRedisService as unknown as RedisService,
-      mockEncryptionService as unknown as EncryptionService,
-      mockDidService as unknown as DidService,
+      mockPrismaService as never,
+      mockRedisService as never,
+      mockEncryptionService as never,
+      mockDidService as never,
     );
   });
 
@@ -371,10 +378,21 @@ describe('VerificationRequestsService', () => {
       }),
     );
 
+    mockDidService.findPublicByOwner.mockResolvedValue({
+      id: 'holder-did-record-id',
+      did: 'did:mock:holder:123',
+      ownerType: DidOwnerType.USER,
+      ownerId: 'holder-id',
+      currentKeyVersion: 1,
+      status: 'ACTIVE',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
     mockDidService.signForUser.mockResolvedValue({
       did: 'did:mock:holder:123',
       keyVersion: 1,
-      signature: 'signature',
+      signature: validHolderSignatureBase64,
     });
 
     transactionClient.verificationRequest.updateMany.mockResolvedValue({
@@ -425,6 +443,97 @@ describe('VerificationRequestsService', () => {
     });
 
     expect(result.presentationId).toBeDefined();
+
+    expect(mockDidService.findPublicByOwner).toHaveBeenCalledWith(
+      DidOwnerType.USER,
+      'holder-id',
+    );
+
+    const presentationCreateCall = transactionClient.presentation.create.mock
+      .calls[0]?.[0] as {
+      data: {
+        id: string;
+        requestId: string;
+        credentialId: string;
+        holderId: string;
+        holderDid: string;
+        disclosedClaims: Record<string, unknown>;
+        nonce: string;
+        presentationHash: string;
+        holderProof: Record<string, unknown>;
+      };
+    };
+
+    const createdAt = presentationCreateCall.data.holderProof.created;
+
+    expect(typeof createdAt).toBe('string');
+
+    const unsecuredPresentation = {
+      presentationId: result.presentationId,
+      requestId: 'request-id',
+      credentialId: 'credential-id',
+      holderDid: 'did:mock:holder:123',
+      disclosedClaims: {
+        degree: 'Bachelor of Science',
+        cgpa: 3.75,
+      },
+    };
+
+    const canonicalPresentation = canonicalizeJson(unsecuredPresentation);
+
+    const expectedPresentationHash = createHash('sha256')
+      .update(canonicalPresentation, 'utf8')
+      .digest('hex');
+
+    const proofOptions = {
+      type: 'DataIntegrityProof',
+      cryptosuite: 'eddsa-jcs-2022',
+      created: createdAt,
+      verificationMethod: 'did:mock:holder:123#key-1',
+      proofPurpose: 'authentication',
+      challenge: 'test-nonce',
+      domain: 'bank-id',
+    };
+
+    const proofConfigHash = createHash('sha256')
+      .update(canonicalizeJson(proofOptions), 'utf8')
+      .digest();
+
+    const transformedDocumentHash = createHash('sha256')
+      .update(canonicalPresentation, 'utf8')
+      .digest();
+
+    const expectedSigningPayload = Buffer.concat([
+      proofConfigHash,
+      transformedDocumentHash,
+    ]);
+
+    expect(expectedSigningPayload).toHaveLength(64);
+
+    expect(mockDidService.signForUser).toHaveBeenCalledWith(
+      'holder-id',
+      expectedSigningPayload,
+    );
+
+    expect(transactionClient.presentation.create).toHaveBeenCalledWith({
+      data: {
+        id: result.presentationId,
+        requestId: 'request-id',
+        credentialId: 'credential-id',
+        holderId: 'holder-id',
+        holderDid: 'did:mock:holder:123',
+        disclosedClaims: {
+          degree: 'Bachelor of Science',
+          cgpa: 3.75,
+        },
+        nonce: 'test-nonce',
+        presentationHash: expectedPresentationHash,
+        holderProof: {
+          ...proofOptions,
+          proofValue: validHolderProofValue,
+        },
+      },
+    });
 
     expect(transactionClient.auditLog.create).toHaveBeenCalledWith({
       data: {

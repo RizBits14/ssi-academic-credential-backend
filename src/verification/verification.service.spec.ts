@@ -37,6 +37,44 @@ describe('VerificationService', () => {
 
   const nonceHash = createHash('sha256').update(nonce).digest('hex');
 
+  const validHolderSignatureBase64 =
+    'AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQ==';
+
+  const validHolderProofValue =
+    'z2AXDGYSE4f2sz7tvMMzyHvUfcoJmxudvdhBcmiUSo6ijwfYmfZYsKRxboQMPh3R4kUhXRVdtSXFXMheka4Rc4P2';
+
+  const holderProofCreated = '2026-09-16T00:00:00.000Z';
+
+  function createValidHolderProof() {
+    return {
+      type: 'DataIntegrityProof',
+      cryptosuite: 'eddsa-jcs-2022',
+      created: holderProofCreated,
+      verificationMethod: 'did:mock:holder:holder-id#key-1',
+      proofPurpose: 'authentication',
+      challenge: nonce,
+      domain: 'bank-id',
+      proofValue: validHolderProofValue,
+    };
+  }
+
+  function calculatePresentationHash(
+    disclosedClaims: Record<string, unknown>,
+  ): string {
+    return createHash('sha256')
+      .update(
+        canonicalizeJson({
+          presentationId: 'presentation-id',
+          requestId: 'request-id',
+          credentialId: 'credential-id',
+          holderDid: 'did:mock:holder:holder-id',
+          disclosedClaims,
+        }),
+        'utf8',
+      )
+      .digest('hex');
+  }
+
   it('should validate trust, credential status, schema, holder, and disclosed claims', async () => {
     const unsignedCredential = {
       '@context': ['https://www.w3.org/ns/credentials/v2'],
@@ -80,11 +118,12 @@ describe('VerificationService', () => {
         major: 'Computer Science',
         cgpa: 3.75,
       },
-      holderProof: {
-        algorithm: 'Ed25519',
-        verificationMethod: 'did:mock:holder:holder-id#key-1',
-        signature: 'holder-signature',
-      },
+      presentationHash: calculatePresentationHash({
+        degree: 'BSc',
+        major: 'Computer Science',
+        cgpa: 3.75,
+      }),
+      holderProof: createValidHolderProof(),
       credential: {
         id: 'credential-id',
         issuerOrganizationId: 'university-org-id',
@@ -335,11 +374,10 @@ describe('VerificationService', () => {
       disclosedClaims: {
         degree: 'BSc',
       },
-      holderProof: {
-        algorithm: 'Ed25519',
-        verificationMethod: 'did:mock:holder:holder-id#key-1',
-        signature: 'holder-signature',
-      },
+      presentationHash: calculatePresentationHash({
+        degree: 'BSc',
+      }),
+      holderProof: createValidHolderProof(),
       credential: {
         id: 'credential-id',
         issuerDid: 'did:mock:university:issuer-id',
@@ -633,11 +671,10 @@ describe('VerificationService', () => {
       disclosedClaims: {
         degree: 'BSc',
       },
-      holderProof: {
-        algorithm: 'Ed25519',
-        verificationMethod: 'did:mock:holder:holder-id#key-1',
-        signature: 'holder-signature',
-      },
+      presentationHash: calculatePresentationHash({
+        degree: 'BSc',
+      }),
+      holderProof: createValidHolderProof(),
       credential: {
         id: 'credential-id',
         issuerDid: 'did:mock:university:issuer-id',
@@ -712,20 +749,45 @@ describe('VerificationService', () => {
       issuerSignatureValid: true,
     });
 
-    const holderSigningPayload = {
+    const unsecuredPresentation = {
       presentationId: 'presentation-id',
       requestId: 'request-id',
-      nonce,
       credentialId: 'credential-id',
+      holderDid: 'did:mock:holder:holder-id',
       disclosedClaims: {
         degree: 'BSc',
       },
     };
 
+    const holderProofOptions = {
+      type: 'DataIntegrityProof',
+      cryptosuite: 'eddsa-jcs-2022',
+      created: holderProofCreated,
+      verificationMethod: 'did:mock:holder:holder-id#key-1',
+      proofPurpose: 'authentication',
+      challenge: nonce,
+      domain: 'bank-id',
+    };
+
+    const holderProofConfigHash = createHash('sha256')
+      .update(canonicalizeJson(holderProofOptions), 'utf8')
+      .digest();
+
+    const holderPresentationHash = createHash('sha256')
+      .update(canonicalizeJson(unsecuredPresentation), 'utf8')
+      .digest();
+
+    const expectedHolderHashData = Buffer.concat([
+      holderProofConfigHash,
+      holderPresentationHash,
+    ]);
+
+    expect(expectedHolderHashData).toHaveLength(64);
+
     expect(mockSignatureService.verify).toHaveBeenNthCalledWith(
       1,
-      canonicalizeJson(holderSigningPayload),
-      'holder-signature',
+      expectedHolderHashData,
+      validHolderSignatureBase64,
       'holder-public-key',
     );
 
