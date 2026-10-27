@@ -278,16 +278,19 @@ export class VerificationService {
     );
 
     const proofValue = proof.proofValue;
-
     const issuerVerificationMethod = proof.verificationMethod;
 
     if (
-      proof.type !== 'Ed25519Signature' ||
+      proof.type !== 'DataIntegrityProof' ||
+      proof.cryptosuite !== 'eddsa-jcs-2022' ||
+      proof.proofPurpose !== 'assertionMethod' ||
       typeof proofValue !== 'string' ||
       typeof issuerVerificationMethod !== 'string'
     ) {
       throw new BadRequestException('Issuer proof is invalid');
     }
+
+    this.assertValidProofCreated(proof.created);
 
     const unsignedCredential: Record<string, unknown> = {
       ...signedCredential,
@@ -295,10 +298,18 @@ export class VerificationService {
 
     delete unsignedCredential.proof;
 
+    const proofOptions: Record<string, unknown> = {
+      ...proof,
+    };
+
+    delete proofOptions.proofValue;
+
+    this.applyAndValidateProofContext(unsignedCredential, proofOptions);
+
     const canonicalCredential = this.canonicalize(unsignedCredential);
 
     const calculatedCredentialHash = createHash('sha256')
-      .update(canonicalCredential)
+      .update(canonicalCredential, 'utf8')
       .digest('hex');
 
     const hashValid =
@@ -320,9 +331,23 @@ export class VerificationService {
       );
     }
 
+    const proofBytes = this.decodeEddsaJcs2022ProofValue(proofValue);
+
+    const canonicalProofConfig = this.canonicalize(proofOptions);
+
+    const proofConfigHash = createHash('sha256')
+      .update(canonicalProofConfig, 'utf8')
+      .digest();
+
+    const transformedDocumentHash = createHash('sha256')
+      .update(canonicalCredential, 'utf8')
+      .digest();
+
+    const hashData = Buffer.concat([proofConfigHash, transformedDocumentHash]);
+
     const issuerSignatureValid = this.signatureService.verify(
-      canonicalCredential,
-      proofValue,
+      hashData,
+      proofBytes.toString('base64'),
       issuerDidDocument.verificationMethod.publicKey,
     );
 
@@ -960,6 +985,116 @@ export class VerificationService {
     const secondSorted = [...second].sort();
 
     return firstSorted.every((value, index) => value === secondSorted[index]);
+  }
+
+  private assertValidProofCreated(value: unknown): void {
+    if (value === undefined) {
+      return;
+    }
+
+    if (typeof value !== 'string' || Number.isNaN(Date.parse(value))) {
+      throw new BadRequestException('Issuer proof is invalid');
+    }
+  }
+
+  private applyAndValidateProofContext(
+    unsignedCredential: Record<string, unknown>,
+    proofOptions: Record<string, unknown>,
+  ): void {
+    if (!Object.prototype.hasOwnProperty.call(proofOptions, '@context')) {
+      return;
+    }
+
+    const proofContext = proofOptions['@context'];
+    const documentContext = unsignedCredential['@context'];
+
+    if (documentContext === undefined) {
+      throw new BadRequestException('Issuer proof context is invalid');
+    }
+
+    const proofContextValues = Array.isArray(proofContext)
+      ? proofContext
+      : [proofContext];
+
+    const documentContextValues = Array.isArray(documentContext)
+      ? documentContext
+      : [documentContext];
+
+    if (documentContextValues.length < proofContextValues.length) {
+      throw new BadRequestException('Issuer proof context is invalid');
+    }
+
+    const contextMatches = proofContextValues.every((value, index) => {
+      return (
+        this.canonicalize(value) ===
+        this.canonicalize(documentContextValues[index])
+      );
+    });
+
+    if (!contextMatches) {
+      throw new BadRequestException('Issuer proof context is invalid');
+    }
+
+    unsignedCredential['@context'] = proofContext;
+  }
+
+  private decodeEddsaJcs2022ProofValue(proofValue: string): Buffer {
+    if (!proofValue.startsWith('z') || proofValue.length <= 1) {
+      throw new BadRequestException('Issuer proof is invalid');
+    }
+
+    const proofBytes = this.decodeBase58(proofValue.slice(1));
+
+    if (proofBytes.length !== 64) {
+      throw new BadRequestException('Issuer proof is invalid');
+    }
+
+    return proofBytes;
+  }
+
+  private decodeBase58(value: string): Buffer {
+    const alphabet =
+      '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+
+    if (value.length === 0) {
+      return Buffer.alloc(0);
+    }
+
+    let numericValue = 0n;
+
+    for (const character of value) {
+      const digit = alphabet.indexOf(character);
+
+      if (digit < 0) {
+        throw new BadRequestException('Issuer proof is invalid');
+      }
+
+      numericValue = numericValue * 58n + BigInt(digit);
+    }
+
+    const decodedBytes: number[] = [];
+
+    while (numericValue > 0n) {
+      decodedBytes.push(Number(numericValue % 256n));
+      numericValue /= 256n;
+    }
+
+    decodedBytes.reverse();
+
+    let leadingZeroCount = 0;
+
+    for (const character of value) {
+      if (character !== '1') {
+        break;
+      }
+
+      leadingZeroCount += 1;
+    }
+
+    return Buffer.concat([
+      Buffer.alloc(leadingZeroCount),
+      Buffer.from(decodedBytes),
+    ]);
   }
 
   private canonicalize(value: unknown): string {

@@ -1,7 +1,11 @@
+import { ConflictException } from '@nestjs/common';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
+import { createHash } from 'node:crypto';
 
+import { canonicalizeJson } from '../common/utils/json-canonicalization.util';
 import { EncryptionService } from '../crypto/encryption.service';
 import { DidService } from '../did/did.service';
+import { DidOwnerType, DidStatus } from '../generated/prisma/enums';
 import { CredentialsService } from './credentials.service';
 
 describe('CredentialsService', () => {
@@ -10,8 +14,13 @@ describe('CredentialsService', () => {
   };
 
   const mockDidService = {
+    findPublicByOwner: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+
     signForOrganization: jest.fn<
-      (...args: unknown[]) => Promise<{
+      (
+        organizationId: string,
+        data: string | Buffer,
+      ) => Promise<{
         did: string;
         keyVersion: number;
         signature: string;
@@ -24,6 +33,14 @@ describe('CredentialsService', () => {
   };
 
   let service: CredentialsService;
+
+  const issuerDid = 'did:example:university';
+
+  const validSignatureBase64 =
+    'AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQ==';
+
+  const validSignatureMultibase =
+    'z2AXDGYSE4f2sz7tvMMzyHvUfcoJmxudvdhBcmiUSo6ijwfYmfZYsKRxboQMPh3R4kUhXRVdtSXFXMheka4Rc4P2';
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -39,7 +56,7 @@ describe('CredentialsService', () => {
     const issuedAt = new Date('2026-10-19T12:00:00.000Z');
 
     const credential = service.buildUnsignedAcademicCredential({
-      issuerDid: 'did:example:university',
+      issuerDid,
       issuerName: 'Example University',
       holderDid: 'did:example:holder',
       fullName: 'Sample Student',
@@ -59,7 +76,7 @@ describe('CredentialsService', () => {
       id: expect.stringMatching(/^urn:uuid:/),
       type: ['VerifiableCredential', 'AcademicCredential'],
       issuer: {
-        id: 'did:example:university',
+        id: issuerDid,
         name: 'Example University',
       },
       validFrom: issuedAt.toISOString(),
@@ -82,7 +99,7 @@ describe('CredentialsService', () => {
 
   it('should omit optional academic fields when they are not provided', () => {
     const credential = service.buildUnsignedAcademicCredential({
-      issuerDid: 'did:example:university',
+      issuerDid,
       issuerName: 'Example University',
       holderDid: 'did:example:holder',
       fullName: 'Sample Student',
@@ -99,14 +116,14 @@ describe('CredentialsService', () => {
     expect(credential.credentialSubject).not.toHaveProperty('cgpa');
   });
 
-  it('should add an issuer proof using the organization DID key', async () => {
+  it('should add an eddsa-jcs-2022 Data Integrity issuer proof', async () => {
     const createdAt = new Date('2026-10-19T12:00:00.000Z');
 
     const unsignedCredential = {
       '@context': ['https://www.w3.org/ns/credentials/v2'],
       id: 'urn:uuid:credential-id',
       issuer: {
-        id: 'did:example:university',
+        id: issuerDid,
       },
       credentialSubject: {
         id: 'did:example:holder',
@@ -114,10 +131,21 @@ describe('CredentialsService', () => {
       },
     };
 
+    mockDidService.findPublicByOwner.mockResolvedValue({
+      id: 'did-record-id',
+      did: issuerDid,
+      ownerType: DidOwnerType.ORGANIZATION,
+      ownerId: 'university-id',
+      currentKeyVersion: 2,
+      status: DidStatus.ACTIVE,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
     mockDidService.signForOrganization.mockResolvedValue({
-      did: 'did:example:university',
+      did: issuerDid,
       keyVersion: 2,
-      signature: 'issuer-signature',
+      signature: validSignatureBase64,
     });
 
     const result = await service.addIssuerProof(
@@ -126,28 +154,236 @@ describe('CredentialsService', () => {
       createdAt,
     );
 
+    expect(mockDidService.findPublicByOwner).toHaveBeenCalledWith(
+      DidOwnerType.ORGANIZATION,
+      'university-id',
+    );
+
+    const proofConfiguration = {
+      type: 'DataIntegrityProof',
+      cryptosuite: 'eddsa-jcs-2022',
+      created: createdAt.toISOString(),
+      verificationMethod: `${issuerDid}#key-2`,
+      proofPurpose: 'assertionMethod',
+      '@context': ['https://www.w3.org/ns/credentials/v2'],
+    };
+
+    const proofConfigHash = createHash('sha256')
+      .update(canonicalizeJson(proofConfiguration), 'utf8')
+      .digest();
+
+    const transformedDocumentHash = createHash('sha256')
+      .update(canonicalizeJson(unsignedCredential), 'utf8')
+      .digest();
+
+    const expectedSigningPayload = Buffer.concat([
+      proofConfigHash,
+      transformedDocumentHash,
+    ]);
+
+    expect(expectedSigningPayload).toHaveLength(64);
+
     expect(mockDidService.signForOrganization).toHaveBeenCalledWith(
       'university-id',
-      service.canonicalize(unsignedCredential),
+      expectedSigningPayload,
     );
 
     expect(result).toEqual({
       ...unsignedCredential,
       proof: {
-        type: 'Ed25519Signature',
+        type: 'DataIntegrityProof',
+        cryptosuite: 'eddsa-jcs-2022',
         created: createdAt.toISOString(),
-        verificationMethod: 'did:example:university#key-2',
-        proofValue: 'issuer-signature',
+        verificationMethod: `${issuerDid}#key-2`,
+        proofPurpose: 'assertionMethod',
+        '@context': ['https://www.w3.org/ns/credentials/v2'],
+        proofValue: validSignatureMultibase,
       },
     });
+  });
+
+  it('should reject signing when the credential issuer does not match the organization DID', async () => {
+    const unsignedCredential = {
+      '@context': ['https://www.w3.org/ns/credentials/v2'],
+      id: 'urn:uuid:credential-id',
+      issuer: {
+        id: 'did:example:different-university',
+      },
+      credentialSubject: {
+        id: 'did:example:holder',
+      },
+    };
+
+    mockDidService.findPublicByOwner.mockResolvedValue({
+      id: 'did-record-id',
+      did: issuerDid,
+      ownerType: DidOwnerType.ORGANIZATION,
+      ownerId: 'university-id',
+      currentKeyVersion: 2,
+      status: DidStatus.ACTIVE,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    await expect(
+      service.addIssuerProof(
+        'university-id',
+        unsignedCredential,
+        new Date('2026-10-19T12:00:00.000Z'),
+      ),
+    ).rejects.toThrow('Credential issuer does not match organization DID');
+
+    expect(mockDidService.signForOrganization).not.toHaveBeenCalled();
+  });
+
+  it('should retry issuer proof creation when the DID key rotates during signing', async () => {
+    const createdAt = new Date('2026-10-19T12:00:00.000Z');
+
+    const unsignedCredential = {
+      '@context': ['https://www.w3.org/ns/credentials/v2'],
+      id: 'urn:uuid:credential-id',
+      issuer: {
+        id: issuerDid,
+      },
+      credentialSubject: {
+        id: 'did:example:holder',
+      },
+    };
+
+    mockDidService.findPublicByOwner
+      .mockResolvedValueOnce({
+        id: 'did-record-id',
+        did: issuerDid,
+        ownerType: DidOwnerType.ORGANIZATION,
+        ownerId: 'university-id',
+        currentKeyVersion: 2,
+        status: DidStatus.ACTIVE,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .mockResolvedValueOnce({
+        id: 'did-record-id',
+        did: issuerDid,
+        ownerType: DidOwnerType.ORGANIZATION,
+        ownerId: 'university-id',
+        currentKeyVersion: 3,
+        status: DidStatus.ACTIVE,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+    mockDidService.signForOrganization
+      .mockResolvedValueOnce({
+        did: issuerDid,
+        keyVersion: 3,
+        signature: validSignatureBase64,
+      })
+      .mockResolvedValueOnce({
+        did: issuerDid,
+        keyVersion: 3,
+        signature: validSignatureBase64,
+      });
+
+    const result = await service.addIssuerProof(
+      'university-id',
+      unsignedCredential,
+      createdAt,
+    );
+
+    expect(mockDidService.findPublicByOwner).toHaveBeenCalledTimes(2);
+
+    expect(mockDidService.signForOrganization).toHaveBeenCalledTimes(2);
+
+    expect(result.proof).toEqual({
+      type: 'DataIntegrityProof',
+      cryptosuite: 'eddsa-jcs-2022',
+      created: createdAt.toISOString(),
+      verificationMethod: `${issuerDid}#key-3`,
+      proofPurpose: 'assertionMethod',
+      '@context': ['https://www.w3.org/ns/credentials/v2'],
+      proofValue: validSignatureMultibase,
+    });
+  });
+
+  it('should fail when the DID key cannot remain stable during signing', async () => {
+    const unsignedCredential = {
+      '@context': ['https://www.w3.org/ns/credentials/v2'],
+      id: 'urn:uuid:credential-id',
+      issuer: {
+        id: issuerDid,
+      },
+      credentialSubject: {
+        id: 'did:example:holder',
+      },
+    };
+
+    mockDidService.findPublicByOwner
+      .mockResolvedValueOnce({
+        id: 'did-record-id',
+        did: issuerDid,
+        ownerType: DidOwnerType.ORGANIZATION,
+        ownerId: 'university-id',
+        currentKeyVersion: 1,
+        status: DidStatus.ACTIVE,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .mockResolvedValueOnce({
+        id: 'did-record-id',
+        did: issuerDid,
+        ownerType: DidOwnerType.ORGANIZATION,
+        ownerId: 'university-id',
+        currentKeyVersion: 2,
+        status: DidStatus.ACTIVE,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .mockResolvedValueOnce({
+        id: 'did-record-id',
+        did: issuerDid,
+        ownerType: DidOwnerType.ORGANIZATION,
+        ownerId: 'university-id',
+        currentKeyVersion: 3,
+        status: DidStatus.ACTIVE,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+    mockDidService.signForOrganization
+      .mockResolvedValueOnce({
+        did: issuerDid,
+        keyVersion: 2,
+        signature: validSignatureBase64,
+      })
+      .mockResolvedValueOnce({
+        did: issuerDid,
+        keyVersion: 3,
+        signature: validSignatureBase64,
+      })
+      .mockResolvedValueOnce({
+        did: issuerDid,
+        keyVersion: 4,
+        signature: validSignatureBase64,
+      });
+
+    await expect(
+      service.addIssuerProof(
+        'university-id',
+        unsignedCredential,
+        new Date('2026-10-19T12:00:00.000Z'),
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+
+    expect(mockDidService.signForOrganization).toHaveBeenCalledTimes(3);
   });
 
   it('should encrypt a signed credential for wallet storage', () => {
     const signedCredential = {
       id: 'urn:uuid:credential-id',
       proof: {
-        type: 'Ed25519Signature',
-        proofValue: 'signature',
+        type: 'DataIntegrityProof',
+        cryptosuite: 'eddsa-jcs-2022',
+        proofValue: validSignatureMultibase,
       },
     };
 

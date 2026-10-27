@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
+import { canonicalizeJson } from '../common/utils/json-canonicalization.util';
 import { EncryptionService } from '../crypto/encryption.service';
 import { SignatureService } from '../crypto/signature.service';
 import { DidService } from '../did/did.service';
@@ -22,6 +23,14 @@ import { CredentialSchemasService } from '../credential-schemas/credential-schem
 import { TrustRegistryService } from '../trust-registry/trust-registry.service';
 
 describe('VerificationService', () => {
+  const validIssuerSignatureBase64 =
+    'AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQ==';
+
+  const validIssuerProofValue =
+    'z2AXDGYSE4f2sz7tvMMzyHvUfcoJmxudvdhBcmiUSo6ijwfYmfZYsKRxboQMPh3R4kUhXRVdtSXFXMheka4Rc4P2';
+
+  const issuerProofCreated = '2026-09-16T00:00:00.000Z';
+
   const futureDate = new Date(Date.now() + 60_000);
 
   const nonce = 'test-nonce';
@@ -53,27 +62,7 @@ describe('VerificationService', () => {
       },
     };
 
-    const sortValue = (value: unknown): unknown => {
-      if (Array.isArray(value)) {
-        return value.map((item) => sortValue(item));
-      }
-
-      if (typeof value === 'object' && value !== null) {
-        const object = value as Record<string, unknown>;
-
-        return Object.keys(object)
-          .sort()
-          .reduce<Record<string, unknown>>((result, key) => {
-            result[key] = sortValue(object[key]);
-
-            return result;
-          }, {});
-      }
-
-      return value;
-    };
-
-    const canonicalCredential = JSON.stringify(sortValue(unsignedCredential));
+    const canonicalCredential = canonicalizeJson(unsignedCredential);
 
     const credentialHash = createHash('sha256')
       .update(canonicalCredential)
@@ -144,9 +133,13 @@ describe('VerificationService', () => {
       JSON.stringify({
         ...unsignedCredential,
         proof: {
-          type: 'Ed25519Signature',
+          type: 'DataIntegrityProof',
+          cryptosuite: 'eddsa-jcs-2022',
+          created: issuerProofCreated,
           verificationMethod: 'did:mock:university:issuer-id#key-1',
-          proofValue: 'issuer-signature',
+          proofPurpose: 'assertionMethod',
+          '@context': ['https://www.w3.org/ns/credentials/v2'],
+          proofValue: validIssuerProofValue,
         },
       }),
     );
@@ -381,6 +374,10 @@ describe('VerificationService', () => {
   beforeEach(() => {
     jest.restoreAllMocks();
     jest.clearAllMocks();
+
+    mockDidService.resolveVerificationMethod.mockReset();
+    mockSignatureService.verify.mockReset();
+    mockEncryptionService.decryptForWallet.mockReset();
   });
 
   it('should validate an approved verification request context', async () => {
@@ -618,17 +615,7 @@ describe('VerificationService', () => {
       },
     };
 
-    const canonicalCredential = JSON.stringify({
-      '@context': unsignedCredential['@context'],
-      credentialSubject: {
-        degree: 'BSc',
-        id: 'did:mock:holder:holder-id',
-      },
-      id: 'urn:uuid:credential',
-      issuer: {
-        id: 'did:mock:university:issuer-id',
-      },
-    });
+    const canonicalCredential = canonicalizeJson(unsignedCredential);
 
     const credentialHash = createHash('sha256')
       .update(canonicalCredential)
@@ -683,9 +670,13 @@ describe('VerificationService', () => {
       JSON.stringify({
         ...unsignedCredential,
         proof: {
-          type: 'Ed25519Signature',
+          type: 'DataIntegrityProof',
+          cryptosuite: 'eddsa-jcs-2022',
+          created: issuerProofCreated,
           verificationMethod: 'did:mock:university:issuer-id#key-1',
-          proofValue: 'issuer-signature',
+          proofPurpose: 'assertionMethod',
+          '@context': ['https://www.w3.org/ns/credentials/v2'],
+          proofValue: validIssuerProofValue,
         },
       }),
     );
@@ -720,6 +711,54 @@ describe('VerificationService', () => {
       hashValid: true,
       issuerSignatureValid: true,
     });
+
+    const holderSigningPayload = {
+      presentationId: 'presentation-id',
+      requestId: 'request-id',
+      nonce,
+      credentialId: 'credential-id',
+      disclosedClaims: {
+        degree: 'BSc',
+      },
+    };
+
+    expect(mockSignatureService.verify).toHaveBeenNthCalledWith(
+      1,
+      canonicalizeJson(holderSigningPayload),
+      'holder-signature',
+      'holder-public-key',
+    );
+
+    const proofOptions = {
+      type: 'DataIntegrityProof',
+      cryptosuite: 'eddsa-jcs-2022',
+      created: issuerProofCreated,
+      verificationMethod: 'did:mock:university:issuer-id#key-1',
+      proofPurpose: 'assertionMethod',
+      '@context': ['https://www.w3.org/ns/credentials/v2'],
+    };
+
+    const proofConfigHash = createHash('sha256')
+      .update(canonicalizeJson(proofOptions), 'utf8')
+      .digest();
+
+    const transformedDocumentHash = createHash('sha256')
+      .update(canonicalizeJson(unsignedCredential), 'utf8')
+      .digest();
+
+    const expectedHashData = Buffer.concat([
+      proofConfigHash,
+      transformedDocumentHash,
+    ]);
+
+    expect(expectedHashData).toHaveLength(64);
+
+    expect(mockSignatureService.verify).toHaveBeenNthCalledWith(
+      2,
+      expectedHashData,
+      validIssuerSignatureBase64,
+      'issuer-public-key',
+    );
   });
 
   it('should reject an invalid holder proof', async () => {
