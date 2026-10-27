@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { randomUUID } from 'node:crypto';
+import { createPublicKey, randomUUID } from 'node:crypto';
 
 import { EncryptionService } from '../crypto/encryption.service';
 import { SignatureService } from '../crypto/signature.service';
@@ -55,7 +55,18 @@ export interface ResolvedDidDocument {
   controller: string;
   verificationMethod: {
     id: string;
-    type: 'Ed25519VerificationKey';
+    type: 'Multikey';
+    controller: string;
+    publicKeyMultibase: string;
+
+    /**
+     * Internal compatibility field.
+     *
+     * The PEM public key remains available because the current
+     * SignatureService verifies signatures using PEM keys.
+     *
+     * publicKeyMultibase is the standards-facing representation.
+     */
     publicKey: string;
   };
   status: DidStatus;
@@ -253,7 +264,7 @@ export class DidService {
 
   async signForOrganization(
     organizationId: string,
-    data: string,
+    data: string | Buffer,
   ): Promise<DidSigningResult> {
     const didRecord = await this.requireActiveOrganizationDid(organizationId);
 
@@ -284,7 +295,10 @@ export class DidService {
     };
   }
 
-  async signForUser(userId: string, data: string): Promise<DidSigningResult> {
+  async signForUser(
+    userId: string,
+    data: string | Buffer,
+  ): Promise<DidSigningResult> {
     const didRecord = await this.requireActiveHolderDid(
       userId,
       'Only holders can sign with user DIDs',
@@ -571,11 +585,93 @@ export class DidService {
       controller: didRecord.did,
       verificationMethod: {
         id: `${didRecord.did}#key-${key.version}`,
-        type: 'Ed25519VerificationKey',
+        type: 'Multikey',
+        controller: didRecord.did,
+        publicKeyMultibase: this.toEd25519PublicKeyMultibase(key.publicKey),
+
+        // Keep PEM internally until SignatureService is migrated to
+        // verify directly from Multikey/publicKeyMultibase.
         publicKey: key.publicKey,
       },
       status: didRecord.status,
     };
+  }
+
+  private toEd25519PublicKeyMultibase(publicKeyPem: string): string {
+    try {
+      const keyObject = createPublicKey(publicKeyPem);
+
+      const jwk = keyObject.export({
+        format: 'jwk',
+      });
+
+      if (jwk.kty !== 'OKP' || jwk.crv !== 'Ed25519' || !jwk.x) {
+        throw new Error('Unsupported Ed25519 public key');
+      }
+
+      const rawPublicKey = Buffer.from(jwk.x, 'base64url');
+
+      if (rawPublicKey.length !== 32) {
+        throw new Error('Invalid Ed25519 public key length');
+      }
+
+      /*
+       * Ed25519 public Multikey:
+       *
+       * multicodec ed25519-pub = 0xed
+       * unsigned-varint encoding = 0xed 0x01
+       *
+       * Multikey bytes:
+       *   0xed 0x01 || 32-byte Ed25519 public key
+       */
+      const multicodecKey = Buffer.concat([
+        Buffer.from([0xed, 0x01]),
+        rawPublicKey,
+      ]);
+
+      /*
+       * Multibase base58btc values use the "z" prefix.
+       */
+      return `z${this.encodeBase58(multicodecKey)}`;
+    } catch {
+      throw new ConflictException('DID public key is invalid');
+    }
+  }
+
+  private encodeBase58(value: Uint8Array): string {
+    const alphabet =
+      '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+
+    if (value.length === 0) {
+      return '';
+    }
+
+    let numericValue = 0n;
+
+    for (const byte of value) {
+      numericValue = numericValue * 256n + BigInt(byte);
+    }
+
+    let encoded = '';
+
+    while (numericValue > 0n) {
+      const remainder = Number(numericValue % 58n);
+
+      encoded = alphabet[remainder] + encoded;
+      numericValue /= 58n;
+    }
+
+    let leadingZeroCount = 0;
+
+    for (const byte of value) {
+      if (byte !== 0) {
+        break;
+      }
+
+      leadingZeroCount += 1;
+    }
+
+    return '1'.repeat(leadingZeroCount) + encoded;
   }
 
   private validateKeyVersion(keyVersion: number): void {

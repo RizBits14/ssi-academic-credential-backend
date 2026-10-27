@@ -14,6 +14,14 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { DidService } from './did.service';
 
+const VALID_ED25519_PUBLIC_KEY = `-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEAHR+8ycqBiMz3us9BWUcvtWHuQ//OkYlGMLXq00CKcNo=
+-----END PUBLIC KEY-----
+`;
+
+const VALID_ED25519_PUBLIC_KEY_MULTIBASE =
+  'z6MkgQwwKwDwbL7FKfhzEifRHxNCwq27TM7AWrtkhu4Npa41';
+
 describe('DidService', () => {
   const transactionClient = {
     did: {
@@ -64,7 +72,10 @@ describe('DidService', () => {
       publicKey: 'PUBLIC_KEY',
       privateKey: 'PRIVATE_KEY',
     })),
-    sign: jest.fn(() => 'signature'),
+
+    sign: jest.fn<(data: string | Buffer, privateKey: string) => string>(
+      () => 'signature',
+    ),
   };
 
   let service: DidService;
@@ -238,7 +249,7 @@ describe('DidService', () => {
       id: 'key-2-id',
       didId: 'did-record-id',
       version: 2,
-      publicKey: 'PUBLIC_KEY_2',
+      publicKey: VALID_ED25519_PUBLIC_KEY,
       algorithm: 'Ed25519',
       status: DidKeyStatus.ACTIVE,
       createdAt: new Date(),
@@ -253,8 +264,10 @@ describe('DidService', () => {
       controller: 'did:mock:holder:123',
       verificationMethod: {
         id: 'did:mock:holder:123#key-2',
-        type: 'Ed25519VerificationKey',
-        publicKey: 'PUBLIC_KEY_2',
+        type: 'Multikey',
+        controller: 'did:mock:holder:123',
+        publicKeyMultibase: VALID_ED25519_PUBLIC_KEY_MULTIBASE,
+        publicKey: VALID_ED25519_PUBLIC_KEY,
       },
       status: DidStatus.ACTIVE,
     });
@@ -276,7 +289,7 @@ describe('DidService', () => {
       id: 'key-1-id',
       didId: 'did-record-id',
       version: 1,
-      publicKey: 'PUBLIC_KEY_1',
+      publicKey: VALID_ED25519_PUBLIC_KEY,
       algorithm: 'Ed25519',
       status: DidKeyStatus.RETIRED,
       createdAt: new Date(),
@@ -291,8 +304,10 @@ describe('DidService', () => {
 
     expect(result.verificationMethod).toEqual({
       id: 'did:mock:university:123#key-1',
-      type: 'Ed25519VerificationKey',
-      publicKey: 'PUBLIC_KEY_1',
+      type: 'Multikey',
+      controller: 'did:mock:university:123',
+      publicKeyMultibase: VALID_ED25519_PUBLIC_KEY_MULTIBASE,
+      publicKey: VALID_ED25519_PUBLIC_KEY,
     });
   });
 
@@ -381,6 +396,53 @@ describe('DidService', () => {
     const result = await service.signForOrganization(
       'university-id',
       'credential-payload',
+    );
+
+    expect(result).toEqual({
+      did: 'did:mock:university:123',
+      keyVersion: 2,
+      signature: 'signature',
+    });
+  });
+
+  it('should support binary Ed25519 signing payloads', async () => {
+    mockPrisma.organization.findUnique.mockResolvedValue({
+      id: 'university-id',
+      status: OrganizationStatus.ACTIVE,
+    });
+
+    mockPrisma.did.findUnique.mockResolvedValue({
+      id: 'did-record-id',
+      did: 'did:mock:university:123',
+      ownerType: DidOwnerType.ORGANIZATION,
+      ownerId: 'university-id',
+      currentKeyVersion: 2,
+      status: DidStatus.ACTIVE,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    mockPrisma.didKey.findUnique.mockResolvedValue({
+      publicKey: VALID_ED25519_PUBLIC_KEY,
+      encryptedPrivateKey: 'encrypted-private-key',
+      iv: 'test-iv',
+      authTag: 'test-auth-tag',
+      encryptionKeyId: 'v1',
+      algorithm: 'Ed25519',
+      version: 2,
+      status: DidKeyStatus.ACTIVE,
+    });
+
+    const signingPayload = Buffer.alloc(64, 0xab);
+
+    const result = await service.signForOrganization(
+      'university-id',
+      signingPayload,
+    );
+
+    expect(mockSignatureService.sign).toHaveBeenCalledWith(
+      signingPayload,
+      'PRIVATE_KEY',
     );
 
     expect(result).toEqual({
