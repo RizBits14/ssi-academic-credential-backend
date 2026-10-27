@@ -33,10 +33,38 @@ export class DidController {
     private readonly organizationsService: OrganizationsService,
   ) {}
 
-  @ApiPublicEndpoint('Resolve a mock DID document')
+  @ApiPublicEndpoint('Resolve a DID document')
   @Get(':did')
-  resolve(@Param('did') did: string) {
-    return this.didService.resolveDid(did);
+  async resolve(@Param('did') did: string) {
+    const resolved = await this.didService.resolveDid(did);
+
+    const verificationMethod = {
+      id: resolved.verificationMethod.id,
+      type: resolved.verificationMethod.type,
+      controller: resolved.verificationMethod.controller,
+      publicKeyMultibase: resolved.verificationMethod.publicKeyMultibase,
+    };
+
+    return {
+      '@context': [
+        'https://www.w3.org/ns/did/v1',
+        'https://w3id.org/security/multikey/v1',
+      ],
+      id: resolved.id,
+      verificationMethod: [verificationMethod],
+
+      /**
+       * The same Ed25519 key is currently authorized for:
+       *
+       * - authentication, which will support holder presentation proofs
+       * - assertionMethod, which supports issuer credential proofs
+       *
+       * These are verification-method references rather than duplicated
+       * embedded key objects.
+       */
+      authentication: [verificationMethod.id],
+      assertionMethod: [verificationMethod.id],
+    };
   }
 
   @ApiProtectedEndpoint('Rotate the current organization DID key', 201)

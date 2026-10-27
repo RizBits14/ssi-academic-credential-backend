@@ -46,6 +46,51 @@ describe('DidController', () => {
     } as unknown as AuthenticatedRequest;
   }
 
+  it('should expose a standards-facing DID document without the internal PEM key', async () => {
+    const did = 'did:mock:holder:123';
+    const verificationMethodId = `${did}#key-2`;
+
+    mockDidService.resolveDid.mockResolvedValue({
+      id: did,
+      controller: did,
+      verificationMethod: {
+        id: verificationMethodId,
+        type: 'Multikey',
+        controller: did,
+        publicKeyMultibase: 'z6MkgQwwKwDwbL7FKfhzEifRHxNCwq27TM7AWrtkhu4Npa41',
+        publicKey: `-----BEGIN PUBLIC KEY-----
+INTERNAL_PEM_KEY
+-----END PUBLIC KEY-----`,
+      },
+      status: 'ACTIVE',
+    });
+
+    const result = await controller.resolve(did);
+
+    expect(mockDidService.resolveDid).toHaveBeenCalledWith(did);
+
+    expect(result).toEqual({
+      '@context': [
+        'https://www.w3.org/ns/did/v1',
+        'https://w3id.org/security/multikey/v1',
+      ],
+      id: did,
+      verificationMethod: [
+        {
+          id: verificationMethodId,
+          type: 'Multikey',
+          controller: did,
+          publicKeyMultibase:
+            'z6MkgQwwKwDwbL7FKfhzEifRHxNCwq27TM7AWrtkhu4Npa41',
+        },
+      ],
+      authentication: [verificationMethodId],
+      assertionMethod: [verificationMethodId],
+    });
+
+    expect(result.verificationMethod[0]).not.toHaveProperty('publicKey');
+  });
+
   it('should scope issuer DID rotation to the active university membership', async () => {
     mockOrganizationsService.findActiveMembershipForUser.mockResolvedValue({
       organization: {
