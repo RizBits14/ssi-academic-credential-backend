@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 
+import { canonicalizeJson } from '../common/utils/json-canonicalization.util';
 import { EncryptionService } from '../crypto/encryption.service';
 import { HashingService } from '../crypto/hashing.service';
 import { DidService } from '../did/did.service';
@@ -111,32 +112,12 @@ export class CredentialsService {
   }
 
   canonicalize(value: unknown): string {
-    return JSON.stringify(this.sortValue(value));
+    return canonicalizeJson(value);
   }
 
   hashCredential(unsignedCredential: unknown): string {
     const canonicalCredential = this.canonicalize(unsignedCredential);
 
     return this.hashingService.sha256(canonicalCredential);
-  }
-
-  private sortValue(value: unknown): unknown {
-    if (Array.isArray(value)) {
-      return value.map((item) => this.sortValue(item));
-    }
-
-    if (typeof value === 'object' && value !== null) {
-      const object = value as Record<string, unknown>;
-
-      return Object.keys(object)
-        .sort()
-        .reduce<Record<string, unknown>>((result, key) => {
-          result[key] = this.sortValue(object[key]);
-
-          return result;
-        }, {});
-    }
-
-    return value;
   }
 }

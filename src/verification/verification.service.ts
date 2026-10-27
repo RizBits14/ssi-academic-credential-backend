@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 
+import { canonicalizeJson } from '../common/utils/json-canonicalization.util';
 import { CredentialSchemasService } from '../credential-schemas/credential-schemas.service';
 import { EncryptionService } from '../crypto/encryption.service';
 import { SignatureService } from '../crypto/signature.service';
@@ -962,27 +963,7 @@ export class VerificationService {
   }
 
   private canonicalize(value: unknown): string {
-    return JSON.stringify(this.sortValue(value));
-  }
-
-  private sortValue(value: unknown): unknown {
-    if (Array.isArray(value)) {
-      return value.map((item) => this.sortValue(item));
-    }
-
-    if (typeof value === 'object' && value !== null) {
-      const object = value as Record<string, unknown>;
-
-      return Object.keys(object)
-        .sort()
-        .reduce<Record<string, unknown>>((result, key) => {
-          result[key] = this.sortValue(object[key]);
-
-          return result;
-        }, {});
-    }
-
-    return value;
+    return canonicalizeJson(value);
   }
 
   private parseJsonObject(

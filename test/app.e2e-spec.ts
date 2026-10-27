@@ -13,6 +13,7 @@ import request from 'supertest';
 
 import { AcademicRecordsService } from '../src/academic-records/academic-records.service';
 import { AppModule } from '../src/app.module';
+import { canonicalizeJson } from '../src/common/utils/json-canonicalization.util';
 import { CredentialSchemasService } from '../src/credential-schemas/credential-schemas.service';
 import { CredentialIssuanceService } from '../src/credentials/credential-issuance.service';
 import { CredentialsService } from '../src/credentials/credentials.service';
@@ -171,7 +172,7 @@ function asRecord(value: unknown): Record<string, unknown> {
 }
 
 function canonicalize(value: unknown): string {
-  return JSON.stringify(sortValue(value));
+  return canonicalizeJson(value);
 }
 
 function encryptLegacy(
@@ -199,26 +200,6 @@ function encryptLegacy(
     iv: iv.toString('base64'),
     authTag: cipher.getAuthTag().toString('base64'),
   };
-}
-
-function sortValue(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map((item) => sortValue(item));
-  }
-
-  if (typeof value === 'object' && value !== null) {
-    const object = value as Record<string, unknown>;
-
-    return Object.keys(object)
-      .sort()
-      .reduce<Record<string, unknown>>((result, key) => {
-        result[key] = sortValue(object[key]);
-
-        return result;
-      }, {});
-  }
-
-  return value;
 }
 
 describe('SSI Academic Credential API (e2e)', () => {

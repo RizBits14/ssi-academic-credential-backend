@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 
+import { canonicalizeJson } from '../common/utils/json-canonicalization.util';
 import { EncryptionService } from '../crypto/encryption.service';
 import { DidService } from '../did/did.service';
 import type { Prisma } from '../generated/prisma/client';
@@ -628,37 +629,11 @@ export class VerificationRequestsService {
   }
 
   private canonicalize(value: unknown): string {
-    if (value === null) {
-      return 'null';
+    try {
+      return canonicalizeJson(value);
+    } catch {
+      throw new BadRequestException('Unable to canonicalize presentation');
     }
-
-    if (
-      typeof value === 'string' ||
-      typeof value === 'number' ||
-      typeof value === 'boolean'
-    ) {
-      return JSON.stringify(value);
-    }
-
-    if (Array.isArray(value)) {
-      return '[' + value.map((item) => this.canonicalize(item)).join(',') + ']';
-    }
-
-    if (this.isRecord(value)) {
-      const keys = Object.keys(value).sort();
-
-      return (
-        '{' +
-        keys
-          .map(
-            (key) => `${JSON.stringify(key)}:` + this.canonicalize(value[key]),
-          )
-          .join(',') +
-        '}'
-      );
-    }
-
-    throw new BadRequestException('Unable to canonicalize presentation');
   }
 
   private isRecord(value: unknown): value is Record<string, unknown> {
