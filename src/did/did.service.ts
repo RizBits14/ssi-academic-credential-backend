@@ -7,7 +7,10 @@ import {
 import { createPublicKey, randomUUID } from 'node:crypto';
 
 import { EncryptionService } from '../crypto/encryption.service';
-import { SignatureService } from '../crypto/signature.service';
+import {
+  SignatureService,
+  type SupportedSignatureAlgorithm,
+} from '../crypto/signature.service';
 import {
   DidKeyStatus,
   DidOwnerType,
@@ -128,6 +131,7 @@ export class DidService {
 
   async createForOrganization(
     organizationId: string,
+    algorithm: SupportedSignatureAlgorithm = 'Ed25519',
   ): Promise<PublicDidRecord> {
     const organization = await this.prisma.organization.findUnique({
       where: {
@@ -160,7 +164,12 @@ export class DidService {
     const prefix =
       organization.type === OrganizationType.UNIVERSITY ? 'university' : 'bank';
 
-    return this.createDid(DidOwnerType.ORGANIZATION, organizationId, prefix);
+    return this.createDid(
+      DidOwnerType.ORGANIZATION,
+      organizationId,
+      prefix,
+      algorithm,
+    );
   }
 
   async createForUser(userId: string): Promise<PublicDidRecord> {
@@ -188,7 +197,7 @@ export class DidService {
       throw new ConflictException('User already has a DID');
     }
 
-    return this.createDid(DidOwnerType.USER, userId, 'holder');
+    return this.createDid(DidOwnerType.USER, userId, 'holder', 'Ed25519');
   }
 
   async findPublicByDid(did: string): Promise<PublicDidRecord | null> {
@@ -231,7 +240,7 @@ export class DidService {
       throw new ConflictException('Current DID key is not active');
     }
 
-    this.assertSupportedAlgorithm(key.algorithm);
+    this.requireSupportedAlgorithm(key.algorithm);
 
     return this.buildResolvedDidDocument(record, key);
   }
@@ -257,7 +266,7 @@ export class DidService {
       throw new NotFoundException('DID verification method not found');
     }
 
-    this.assertSupportedAlgorithm(key.algorithm);
+    this.requireSupportedAlgorithm(key.algorithm);
 
     return this.buildResolvedDidDocument(record, key);
   }
@@ -265,6 +274,7 @@ export class DidService {
   async signForOrganization(
     organizationId: string,
     data: string | Buffer,
+    algorithm: SupportedSignatureAlgorithm = 'Ed25519',
   ): Promise<DidSigningResult> {
     const didRecord = await this.requireActiveOrganizationDid(organizationId);
 
@@ -277,7 +287,7 @@ export class DidService {
       throw new NotFoundException('Organization DID signing key not found');
     }
 
-    this.assertKeyCanSign(key, 'Organization');
+    this.assertKeyCanSign(key, 'Organization', algorithm);
 
     const privateKey = this.encryptionService.decryptForDid({
       ciphertext: key.encryptedPrivateKey,
@@ -286,7 +296,7 @@ export class DidService {
       keyId: key.encryptionKeyId,
     });
 
-    const signature = this.signatureService.sign(data, privateKey);
+    const signature = this.signWithAlgorithm(data, privateKey, algorithm);
 
     return {
       did: didRecord.did,
@@ -313,7 +323,7 @@ export class DidService {
       throw new NotFoundException('Holder DID signing key not found');
     }
 
-    this.assertKeyCanSign(key, 'Holder');
+    this.assertKeyCanSign(key, 'Holder', 'Ed25519');
 
     const privateKey = this.encryptionService.decryptForDid({
       ciphertext: key.encryptedPrivateKey,
@@ -322,7 +332,7 @@ export class DidService {
       keyId: key.encryptionKeyId,
     });
 
-    const signature = this.signatureService.sign(data, privateKey);
+    const signature = this.signWithAlgorithm(data, privateKey, 'Ed25519');
 
     return {
       did: didRecord.did,
@@ -334,14 +344,19 @@ export class DidService {
   async rotateForOrganization(
     organizationId: string,
     actorId?: string,
+    algorithm?: SupportedSignatureAlgorithm,
   ): Promise<DidKeyRotationResult> {
     const didRecord = await this.requireActiveOrganizationDid(organizationId);
+
+    const targetAlgorithm =
+      algorithm ?? (await this.currentKeyAlgorithm(didRecord));
 
     return this.rotateKey(
       didRecord,
       DidOwnerType.ORGANIZATION,
       organizationId,
       actorId,
+      targetAlgorithm,
     );
   }
 
@@ -351,7 +366,13 @@ export class DidService {
       'Only holders can rotate user DID keys',
     );
 
-    return this.rotateKey(didRecord, DidOwnerType.USER, userId, userId);
+    return this.rotateKey(
+      didRecord,
+      DidOwnerType.USER,
+      userId,
+      userId,
+      'Ed25519',
+    );
   }
 
   async revokeHistoricalKeyForOrganization(
@@ -396,8 +417,12 @@ export class DidService {
     organizationId: string,
     actorId: string,
     reason?: string,
+    algorithm?: SupportedSignatureAlgorithm,
   ): Promise<DidKeyRotationResult> {
     const didRecord = await this.requireActiveOrganizationDid(organizationId);
+
+    const targetAlgorithm =
+      algorithm ?? (await this.currentKeyAlgorithm(didRecord));
 
     return this.recoverCurrentKey(
       didRecord,
@@ -405,6 +430,7 @@ export class DidService {
       organizationId,
       actorId,
       reason,
+      targetAlgorithm,
     );
   }
 
@@ -423,6 +449,7 @@ export class DidService {
       userId,
       userId,
       reason,
+      'Ed25519',
     );
   }
 
@@ -556,22 +583,32 @@ export class DidService {
     return Number(versionText);
   }
 
-  private assertSupportedAlgorithm(algorithm: string): void {
-    if (algorithm !== 'Ed25519') {
-      throw new ConflictException('DID algorithm is not supported');
+  private requireSupportedAlgorithm(
+    algorithm: string,
+  ): SupportedSignatureAlgorithm {
+    if (algorithm === 'Ed25519' || algorithm === 'P-256') {
+      return algorithm;
     }
+
+    throw new ConflictException('DID algorithm is not supported');
   }
 
-  private assertKeyCanSign(key: SigningDidKeyRecord, ownerLabel: string): void {
+  private assertKeyCanSign(
+    key: SigningDidKeyRecord,
+    ownerLabel: string,
+    expectedAlgorithm: SupportedSignatureAlgorithm,
+  ): void {
     if (key.status !== DidKeyStatus.ACTIVE) {
       throw new ConflictException(
         `${ownerLabel} DID signing key is not active`,
       );
     }
 
-    if (key.algorithm !== 'Ed25519') {
+    const keyAlgorithm = this.requireSupportedAlgorithm(key.algorithm);
+
+    if (keyAlgorithm !== expectedAlgorithm) {
       throw new ConflictException(
-        `${ownerLabel} DID algorithm is not supported`,
+        `${ownerLabel} DID signing key algorithm does not match requested algorithm`,
       );
     }
   }
@@ -587,7 +624,10 @@ export class DidService {
         id: `${didRecord.did}#key-${key.version}`,
         type: 'Multikey',
         controller: didRecord.did,
-        publicKeyMultibase: this.toEd25519PublicKeyMultibase(key.publicKey),
+        publicKeyMultibase: this.toPublicKeyMultibase(
+          key.publicKey,
+          key.algorithm,
+        ),
 
         // Keep PEM internally until SignatureService is migrated to
         // verify directly from Multikey/publicKeyMultibase.
@@ -595,6 +635,73 @@ export class DidService {
       },
       status: didRecord.status,
     };
+  }
+
+  private toPublicKeyMultibase(
+    publicKeyPem: string,
+    algorithm: string,
+  ): string {
+    const supportedAlgorithm = this.requireSupportedAlgorithm(algorithm);
+
+    switch (supportedAlgorithm) {
+      case 'Ed25519':
+        return this.toEd25519PublicKeyMultibase(publicKeyPem);
+
+      case 'P-256':
+        return this.toP256PublicKeyMultibase(publicKeyPem);
+    }
+  }
+
+  private toP256PublicKeyMultibase(publicKeyPem: string): string {
+    try {
+      const keyObject = createPublicKey(publicKeyPem);
+
+      const jwk = keyObject.export({
+        format: 'jwk',
+      });
+
+      if (jwk.kty !== 'EC' || jwk.crv !== 'P-256' || !jwk.x || !jwk.y) {
+        throw new Error('Unsupported P-256 public key');
+      }
+
+      const x = Buffer.from(jwk.x, 'base64url');
+      const y = Buffer.from(jwk.y, 'base64url');
+
+      if (x.length !== 32 || y.length !== 32) {
+        throw new Error('Invalid P-256 public key length');
+      }
+
+      const lastYByte = y[y.length - 1];
+
+      if (lastYByte === undefined) {
+        throw new Error('Invalid P-256 public key');
+      }
+
+      const compressedPointPrefix = (lastYByte & 1) === 0 ? 0x02 : 0x03;
+
+      const compressedPublicKey = Buffer.concat([
+        Buffer.from([compressedPointPrefix]),
+        x,
+      ]);
+
+      /*
+       * P-256 public Multikey:
+       *
+       * multicodec p256-pub = 0x1200
+       * unsigned-varint encoding = 0x80 0x24
+       *
+       * Multikey bytes:
+       *   0x80 0x24 || 33-byte compressed P-256 public key
+       */
+      const multicodecKey = Buffer.concat([
+        Buffer.from([0x80, 0x24]),
+        compressedPublicKey,
+      ]);
+
+      return `z${this.encodeBase58(multicodecKey)}`;
+    } catch {
+      throw new ConflictException('DID public key is invalid');
+    }
   }
 
   private toEd25519PublicKeyMultibase(publicKeyPem: string): string {
@@ -674,6 +781,41 @@ export class DidService {
     return '1'.repeat(leadingZeroCount) + encoded;
   }
 
+  private generateKeyPairForAlgorithm(algorithm: SupportedSignatureAlgorithm) {
+    if (algorithm === 'Ed25519') {
+      return this.signatureService.generateKeyPair();
+    }
+
+    return this.signatureService.generateKeyPairForAlgorithm(algorithm);
+  }
+
+  private signWithAlgorithm(
+    data: string | Buffer,
+    privateKey: string,
+    algorithm: SupportedSignatureAlgorithm,
+  ): string {
+    if (algorithm === 'Ed25519') {
+      return this.signatureService.sign(data, privateKey);
+    }
+
+    return this.signatureService.signWithAlgorithm(data, privateKey, algorithm);
+  }
+
+  private async currentKeyAlgorithm(
+    didRecord: PublicDidRecord,
+  ): Promise<SupportedSignatureAlgorithm> {
+    const currentKey = await this.findPublicKeyByVersion(
+      didRecord.id,
+      didRecord.currentKeyVersion,
+    );
+
+    if (!currentKey || currentKey.status !== DidKeyStatus.ACTIVE) {
+      throw new ConflictException('Current DID key is not active');
+    }
+
+    return this.requireSupportedAlgorithm(currentKey.algorithm);
+  }
+
   private validateKeyVersion(keyVersion: number): void {
     if (!Number.isInteger(keyVersion) || keyVersion < 1) {
       throw new BadRequestException(
@@ -698,9 +840,10 @@ export class DidService {
     didRecord: PublicDidRecord,
     ownerType: DidOwnerType,
     ownerId: string,
-    actorId?: string,
+    actorId: string | undefined,
+    algorithm: SupportedSignatureAlgorithm,
   ): Promise<DidKeyRotationResult> {
-    const keyPair = this.signatureService.generateKeyPair();
+    const keyPair = this.generateKeyPairForAlgorithm(algorithm);
 
     const encryptedPrivateKey = this.encryptionService.encryptForDid(
       keyPair.privateKey,
@@ -751,7 +894,7 @@ export class DidService {
           iv: encryptedPrivateKey.iv,
           authTag: encryptedPrivateKey.authTag,
           encryptionKeyId: encryptedPrivateKey.keyId,
-          algorithm: 'Ed25519',
+          algorithm,
           status: DidKeyStatus.ACTIVE,
         },
         select: publicDidKeySelect,
@@ -884,9 +1027,10 @@ export class DidService {
     ownerType: DidOwnerType,
     ownerId: string,
     actorId: string,
-    reason?: string,
+    reason: string | undefined,
+    algorithm: SupportedSignatureAlgorithm,
   ): Promise<DidKeyRotationResult> {
-    const keyPair = this.signatureService.generateKeyPair();
+    const keyPair = this.generateKeyPairForAlgorithm(algorithm);
 
     const encryptedPrivateKey = this.encryptionService.encryptForDid(
       keyPair.privateKey,
@@ -937,7 +1081,7 @@ export class DidService {
           iv: encryptedPrivateKey.iv,
           authTag: encryptedPrivateKey.authTag,
           encryptionKeyId: encryptedPrivateKey.keyId,
-          algorithm: 'Ed25519',
+          algorithm,
           status: DidKeyStatus.ACTIVE,
         },
         select: publicDidKeySelect,
@@ -982,8 +1126,9 @@ export class DidService {
     ownerType: DidOwnerType,
     ownerId: string,
     prefix: string,
+    algorithm: SupportedSignatureAlgorithm,
   ): Promise<PublicDidRecord> {
-    const keyPair = this.signatureService.generateKeyPair();
+    const keyPair = this.generateKeyPairForAlgorithm(algorithm);
 
     const encryptedPrivateKey = this.encryptionService.encryptForDid(
       keyPair.privateKey,
@@ -1012,7 +1157,7 @@ export class DidService {
           iv: encryptedPrivateKey.iv,
           authTag: encryptedPrivateKey.authTag,
           encryptionKeyId: encryptedPrivateKey.keyId,
-          algorithm: 'Ed25519',
+          algorithm,
           status: DidKeyStatus.ACTIVE,
         },
       });

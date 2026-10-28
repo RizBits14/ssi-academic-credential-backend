@@ -22,6 +22,15 @@ MCowBQYDK2VwAyEAHR+8ycqBiMz3us9BWUcvtWHuQ//OkYlGMLXq00CKcNo=
 const VALID_ED25519_PUBLIC_KEY_MULTIBASE =
   'z6MkgQwwKwDwbL7FKfhzEifRHxNCwq27TM7AWrtkhu4Npa41';
 
+const VALID_P256_PUBLIC_KEY = `-----BEGIN PUBLIC KEY-----
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEigrFmi0whuihKnj9R3Om1SoMph72
+wUGeFaBbzG2vznt5+xflvXTHzKPKuPifLekZ8txjtdvLUrOCo52qeyskgw==
+-----END PUBLIC KEY-----
+`;
+
+const VALID_P256_PUBLIC_KEY_MULTIBASE =
+  'zDnaerx9CtbPJ1q36T5Ln5wYt3MQYeGRG5ehnPAmxcf5mDZpv';
+
 describe('DidService', () => {
   const transactionClient = {
     did: {
@@ -73,8 +82,28 @@ describe('DidService', () => {
       privateKey: 'PRIVATE_KEY',
     })),
 
+    generateKeyPairForAlgorithm: jest.fn<
+      (algorithm: 'Ed25519' | 'P-256') => {
+        publicKey: string;
+        privateKey: string;
+      }
+    >(() => ({
+      publicKey: VALID_P256_PUBLIC_KEY,
+      privateKey: 'P256_PRIVATE_KEY',
+    })),
+
     sign: jest.fn<(data: string | Buffer, privateKey: string) => string>(
       () => 'signature',
+    ),
+
+    signWithAlgorithm: jest.fn(
+      (data: string | Buffer, privateKey: string, algorithm: 'P-256') => {
+        void data;
+        void privateKey;
+        void algorithm;
+
+        return 'p256-signature';
+      },
     ),
   };
 
@@ -273,6 +302,41 @@ describe('DidService', () => {
     });
   });
 
+  it('should resolve a P-256 Multikey using the W3C public-key representation', async () => {
+    mockPrisma.did.findUnique.mockResolvedValue({
+      id: 'did-record-id',
+      did: 'did:mock:university:123',
+      ownerType: DidOwnerType.ORGANIZATION,
+      ownerId: 'university-id',
+      currentKeyVersion: 2,
+      status: DidStatus.ACTIVE,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    mockPrisma.didKey.findUnique.mockResolvedValue({
+      id: 'key-2-id',
+      didId: 'did-record-id',
+      version: 2,
+      publicKey: VALID_P256_PUBLIC_KEY,
+      algorithm: 'P-256',
+      status: DidKeyStatus.ACTIVE,
+      createdAt: new Date(),
+      retiredAt: null,
+      revokedAt: null,
+    });
+
+    const result = await service.resolveDid('did:mock:university:123');
+
+    expect(result.verificationMethod).toEqual({
+      id: 'did:mock:university:123#key-2',
+      type: 'Multikey',
+      controller: 'did:mock:university:123',
+      publicKeyMultibase: VALID_P256_PUBLIC_KEY_MULTIBASE,
+      publicKey: VALID_P256_PUBLIC_KEY,
+    });
+  });
+
   it('should resolve a retired historical key for old proof verification', async () => {
     mockPrisma.did.findUnique.mockResolvedValue({
       id: 'did-record-id',
@@ -452,6 +516,96 @@ describe('DidService', () => {
     });
   });
 
+  it('should sign with a P-256 organization key only when explicitly requested', async () => {
+    mockPrisma.organization.findUnique.mockResolvedValue({
+      id: 'university-id',
+      status: OrganizationStatus.ACTIVE,
+    });
+
+    mockPrisma.did.findUnique.mockResolvedValue({
+      id: 'did-record-id',
+      did: 'did:mock:university:123',
+      ownerType: DidOwnerType.ORGANIZATION,
+      ownerId: 'university-id',
+      currentKeyVersion: 2,
+      status: DidStatus.ACTIVE,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    mockPrisma.didKey.findUnique.mockResolvedValue({
+      publicKey: VALID_P256_PUBLIC_KEY,
+      encryptedPrivateKey: 'encrypted-private-key',
+      iv: 'test-iv',
+      authTag: 'test-auth-tag',
+      encryptionKeyId: 'v1',
+      algorithm: 'P-256',
+      version: 2,
+      status: DidKeyStatus.ACTIVE,
+    });
+
+    const signingPayload = Buffer.alloc(64, 0xcd);
+
+    const result = await service.signForOrganization(
+      'university-id',
+      signingPayload,
+      'P-256',
+    );
+
+    expect(mockSignatureService.signWithAlgorithm).toHaveBeenCalledWith(
+      signingPayload,
+      'PRIVATE_KEY',
+      'P-256',
+    );
+
+    expect(mockSignatureService.sign).not.toHaveBeenCalled();
+
+    expect(result).toEqual({
+      did: 'did:mock:university:123',
+      keyVersion: 2,
+      signature: 'p256-signature',
+    });
+  });
+
+  it('should reject using an Ed25519 proof path with a P-256 organization key', async () => {
+    mockPrisma.organization.findUnique.mockResolvedValue({
+      id: 'university-id',
+      status: OrganizationStatus.ACTIVE,
+    });
+
+    mockPrisma.did.findUnique.mockResolvedValue({
+      id: 'did-record-id',
+      did: 'did:mock:university:123',
+      ownerType: DidOwnerType.ORGANIZATION,
+      ownerId: 'university-id',
+      currentKeyVersion: 2,
+      status: DidStatus.ACTIVE,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    mockPrisma.didKey.findUnique.mockResolvedValue({
+      publicKey: VALID_P256_PUBLIC_KEY,
+      encryptedPrivateKey: 'encrypted-private-key',
+      iv: 'test-iv',
+      authTag: 'test-auth-tag',
+      encryptionKeyId: 'v1',
+      algorithm: 'P-256',
+      version: 2,
+      status: DidKeyStatus.ACTIVE,
+    });
+
+    await expect(
+      service.signForOrganization('university-id', 'credential-payload'),
+    ).rejects.toThrow(
+      'Organization DID signing key algorithm does not match requested algorithm',
+    );
+
+    expect(mockEncryptionService.decryptForDid).not.toHaveBeenCalled();
+    expect(mockSignatureService.sign).not.toHaveBeenCalled();
+    expect(mockSignatureService.signWithAlgorithm).not.toHaveBeenCalled();
+  });
+
   it('should reject signing with a retired key', async () => {
     mockPrisma.organization.findUnique.mockResolvedValue({
       id: 'university-id',
@@ -502,6 +656,18 @@ describe('DidService', () => {
       status: DidStatus.ACTIVE,
       createdAt: new Date(),
       updatedAt: new Date(),
+    });
+
+    mockPrisma.didKey.findUnique.mockResolvedValue({
+      id: 'key-1-id',
+      didId: 'did-record-id',
+      version: 1,
+      publicKey: VALID_ED25519_PUBLIC_KEY,
+      algorithm: 'Ed25519',
+      status: DidKeyStatus.ACTIVE,
+      createdAt: new Date(),
+      retiredAt: null,
+      revokedAt: null,
     });
 
     transactionClient.did.updateMany.mockResolvedValue({
@@ -561,6 +727,90 @@ describe('DidService', () => {
     });
   });
 
+  it('should rotate an organization DID from Ed25519 to P-256 explicitly', async () => {
+    mockPrisma.organization.findUnique.mockResolvedValue({
+      id: 'university-id',
+      status: OrganizationStatus.ACTIVE,
+    });
+
+    mockPrisma.did.findUnique.mockResolvedValue({
+      id: 'did-record-id',
+      did: 'did:mock:university:123',
+      ownerType: DidOwnerType.ORGANIZATION,
+      ownerId: 'university-id',
+      currentKeyVersion: 1,
+      status: DidStatus.ACTIVE,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    transactionClient.did.updateMany.mockResolvedValue({
+      count: 1,
+    });
+
+    transactionClient.didKey.updateMany.mockResolvedValue({
+      count: 1,
+    });
+
+    transactionClient.didKey.create.mockResolvedValue({
+      id: 'key-2-id',
+      didId: 'did-record-id',
+      version: 2,
+      publicKey: VALID_P256_PUBLIC_KEY,
+      algorithm: 'P-256',
+      status: DidKeyStatus.ACTIVE,
+      createdAt: new Date(),
+      retiredAt: null,
+      revokedAt: null,
+    });
+
+    transactionClient.auditLog.create.mockResolvedValue({
+      id: 'audit-id',
+    });
+
+    const result = await service.rotateForOrganization(
+      'university-id',
+      'issuer-admin-id',
+      'P-256',
+    );
+
+    expect(
+      mockSignatureService.generateKeyPairForAlgorithm,
+    ).toHaveBeenCalledWith('P-256');
+
+    expect(transactionClient.didKey.create).toHaveBeenCalledWith({
+      data: {
+        didId: 'did-record-id',
+        version: 2,
+        publicKey: VALID_P256_PUBLIC_KEY,
+        encryptedPrivateKey: 'encrypted-private-key',
+        iv: 'test-iv',
+        authTag: 'test-auth-tag',
+        encryptionKeyId: 'v1',
+        algorithm: 'P-256',
+        status: DidKeyStatus.ACTIVE,
+      },
+      select: {
+        id: true,
+        didId: true,
+        version: true,
+        publicKey: true,
+        algorithm: true,
+        status: true,
+        createdAt: true,
+        retiredAt: true,
+        revokedAt: true,
+      },
+    });
+
+    expect(result).toEqual({
+      did: 'did:mock:university:123',
+      keyVersion: 2,
+      verificationMethod: 'did:mock:university:123#key-2',
+      publicKey: VALID_P256_PUBLIC_KEY,
+    });
+  });
+
   it('should reject a concurrent stale key rotation', async () => {
     mockPrisma.organization.findUnique.mockResolvedValue({
       id: 'university-id',
@@ -576,6 +826,18 @@ describe('DidService', () => {
       status: DidStatus.ACTIVE,
       createdAt: new Date(),
       updatedAt: new Date(),
+    });
+
+    mockPrisma.didKey.findUnique.mockResolvedValue({
+      id: 'key-1-id',
+      didId: 'did-record-id',
+      version: 1,
+      publicKey: VALID_ED25519_PUBLIC_KEY,
+      algorithm: 'Ed25519',
+      status: DidKeyStatus.ACTIVE,
+      createdAt: new Date(),
+      retiredAt: null,
+      revokedAt: null,
     });
 
     transactionClient.did.updateMany.mockResolvedValue({
@@ -760,6 +1022,18 @@ describe('DidService', () => {
       updatedAt: new Date(),
     });
 
+    mockPrisma.didKey.findUnique.mockResolvedValue({
+      id: 'key-2-id',
+      didId: 'did-record-id',
+      version: 2,
+      publicKey: VALID_ED25519_PUBLIC_KEY,
+      algorithm: 'Ed25519',
+      status: DidKeyStatus.ACTIVE,
+      createdAt: new Date(),
+      retiredAt: null,
+      revokedAt: null,
+    });
+
     transactionClient.did.updateMany.mockResolvedValue({
       count: 1,
     });
@@ -864,6 +1138,102 @@ describe('DidService', () => {
     });
   });
 
+  it('should preserve P-256 during organization key recovery by default', async () => {
+    mockPrisma.organization.findUnique.mockResolvedValue({
+      id: 'university-id',
+      status: OrganizationStatus.ACTIVE,
+    });
+
+    mockPrisma.did.findUnique.mockResolvedValue({
+      id: 'did-record-id',
+      did: 'did:mock:university:123',
+      ownerType: DidOwnerType.ORGANIZATION,
+      ownerId: 'university-id',
+      currentKeyVersion: 2,
+      status: DidStatus.ACTIVE,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    mockPrisma.didKey.findUnique.mockResolvedValue({
+      id: 'key-2-id',
+      didId: 'did-record-id',
+      version: 2,
+      publicKey: VALID_P256_PUBLIC_KEY,
+      algorithm: 'P-256',
+      status: DidKeyStatus.ACTIVE,
+      createdAt: new Date(),
+      retiredAt: null,
+      revokedAt: null,
+    });
+
+    transactionClient.did.updateMany.mockResolvedValue({
+      count: 1,
+    });
+
+    transactionClient.didKey.updateMany.mockResolvedValue({
+      count: 1,
+    });
+
+    transactionClient.didKey.create.mockResolvedValue({
+      id: 'key-3-id',
+      didId: 'did-record-id',
+      version: 3,
+      publicKey: VALID_P256_PUBLIC_KEY,
+      algorithm: 'P-256',
+      status: DidKeyStatus.ACTIVE,
+      createdAt: new Date(),
+      retiredAt: null,
+      revokedAt: null,
+    });
+
+    transactionClient.auditLog.create.mockResolvedValue({
+      id: 'audit-id',
+    });
+
+    const result = await service.recoverForOrganization(
+      'university-id',
+      'issuer-admin-id',
+      'Compromised P-256 key',
+    );
+
+    expect(
+      mockSignatureService.generateKeyPairForAlgorithm,
+    ).toHaveBeenCalledWith('P-256');
+
+    expect(transactionClient.didKey.create).toHaveBeenCalledWith({
+      data: {
+        didId: 'did-record-id',
+        version: 3,
+        publicKey: VALID_P256_PUBLIC_KEY,
+        encryptedPrivateKey: 'encrypted-private-key',
+        iv: 'test-iv',
+        authTag: 'test-auth-tag',
+        encryptionKeyId: 'v1',
+        algorithm: 'P-256',
+        status: DidKeyStatus.ACTIVE,
+      },
+      select: {
+        id: true,
+        didId: true,
+        version: true,
+        publicKey: true,
+        algorithm: true,
+        status: true,
+        createdAt: true,
+        retiredAt: true,
+        revokedAt: true,
+      },
+    });
+
+    expect(result).toEqual({
+      did: 'did:mock:university:123',
+      keyVersion: 3,
+      verificationMethod: 'did:mock:university:123#key-3',
+      publicKey: VALID_P256_PUBLIC_KEY,
+    });
+  });
+
   it('should reject a concurrent stale recovery', async () => {
     mockPrisma.organization.findUnique.mockResolvedValue({
       id: 'university-id',
@@ -879,6 +1249,18 @@ describe('DidService', () => {
       status: DidStatus.ACTIVE,
       createdAt: new Date(),
       updatedAt: new Date(),
+    });
+
+    mockPrisma.didKey.findUnique.mockResolvedValue({
+      id: 'key-2-id',
+      didId: 'did-record-id',
+      version: 2,
+      publicKey: VALID_ED25519_PUBLIC_KEY,
+      algorithm: 'Ed25519',
+      status: DidKeyStatus.ACTIVE,
+      createdAt: new Date(),
+      retiredAt: null,
+      revokedAt: null,
     });
 
     transactionClient.did.updateMany.mockResolvedValue({
