@@ -1,4 +1,6 @@
-import { describe, expect, it } from '@jest/globals';
+/// <reference types="jest" />
+import assert from 'node:assert/strict';
+import { createPrivateKey, createPublicKey } from 'node:crypto';
 
 import { SignatureService } from './signature.service';
 
@@ -9,15 +11,21 @@ describe('SignatureService', () => {
     it('should generate an Ed25519 key pair using the backward-compatible API', () => {
       const keyPair = signatureService.generateKeyPair();
 
-      expect(keyPair.publicKey).toContain('BEGIN PUBLIC KEY');
-      expect(keyPair.privateKey).toContain('BEGIN PRIVATE KEY');
+      const publicKey = createPublicKey(keyPair.publicKey);
+      const privateKey = createPrivateKey(keyPair.privateKey);
+
+      assert.equal(publicKey.asymmetricKeyType, 'ed25519');
+      assert.equal(privateKey.asymmetricKeyType, 'ed25519');
     });
 
     it('should generate an Ed25519 key pair using the algorithm-aware API', () => {
       const keyPair = signatureService.generateKeyPairForAlgorithm('Ed25519');
 
-      expect(keyPair.publicKey).toContain('BEGIN PUBLIC KEY');
-      expect(keyPair.privateKey).toContain('BEGIN PRIVATE KEY');
+      const publicKey = createPublicKey(keyPair.publicKey);
+      const privateKey = createPrivateKey(keyPair.privateKey);
+
+      assert.equal(publicKey.asymmetricKeyType, 'ed25519');
+      assert.equal(privateKey.asymmetricKeyType, 'ed25519');
     });
 
     it('should sign and verify Ed25519 string data using the backward-compatible API', () => {
@@ -29,7 +37,7 @@ describe('SignatureService', () => {
 
       const valid = signatureService.verify(data, signature, keyPair.publicKey);
 
-      expect(valid).toBe(true);
+      assert.equal(valid, true);
     });
 
     it('should sign and verify Ed25519 Buffer data', () => {
@@ -50,7 +58,7 @@ describe('SignatureService', () => {
         'Ed25519',
       );
 
-      expect(valid).toBe(true);
+      assert.equal(valid, true);
     });
 
     it('should produce a 64-byte Ed25519 signature', () => {
@@ -62,7 +70,9 @@ describe('SignatureService', () => {
         'Ed25519',
       );
 
-      expect(Buffer.from(signature, 'base64')).toHaveLength(64);
+      const signatureBytes = Buffer.from(signature, 'base64');
+
+      assert.equal(signatureBytes.length, 64);
     });
 
     it('should reject modified Ed25519 data', () => {
@@ -76,7 +86,7 @@ describe('SignatureService', () => {
         keyPair.publicKey,
       );
 
-      expect(valid).toBe(false);
+      assert.equal(valid, false);
     });
 
     it('should reject an Ed25519 signature verified with another public key', () => {
@@ -98,7 +108,7 @@ describe('SignatureService', () => {
         'Ed25519',
       );
 
-      expect(valid).toBe(false);
+      assert.equal(valid, false);
     });
   });
 
@@ -106,8 +116,15 @@ describe('SignatureService', () => {
     it('should generate a P-256 key pair', () => {
       const keyPair = signatureService.generateKeyPairForAlgorithm('P-256');
 
-      expect(keyPair.publicKey).toContain('BEGIN PUBLIC KEY');
-      expect(keyPair.privateKey).toContain('BEGIN PRIVATE KEY');
+      const publicKey = createPublicKey(keyPair.publicKey);
+      const privateKey = createPrivateKey(keyPair.privateKey);
+
+      assert.equal(publicKey.asymmetricKeyType, 'ec');
+      assert.equal(privateKey.asymmetricKeyType, 'ec');
+
+      assert.equal(publicKey.asymmetricKeyDetails?.namedCurve, 'prime256v1');
+
+      assert.equal(privateKey.asymmetricKeyDetails?.namedCurve, 'prime256v1');
     });
 
     it('should sign and verify P-256 string data', () => {
@@ -128,7 +145,7 @@ describe('SignatureService', () => {
         'P-256',
       );
 
-      expect(valid).toBe(true);
+      assert.equal(valid, true);
     });
 
     it('should sign and verify P-256 Buffer data', () => {
@@ -149,7 +166,7 @@ describe('SignatureService', () => {
         'P-256',
       );
 
-      expect(valid).toBe(true);
+      assert.equal(valid, true);
     });
 
     it('should produce a 64-byte IEEE-P1363 P-256 signature', () => {
@@ -161,7 +178,9 @@ describe('SignatureService', () => {
         'P-256',
       );
 
-      expect(Buffer.from(signature, 'base64')).toHaveLength(64);
+      const signatureBytes = Buffer.from(signature, 'base64');
+
+      assert.equal(signatureBytes.length, 64);
     });
 
     it('should reject modified P-256 data', () => {
@@ -180,7 +199,7 @@ describe('SignatureService', () => {
         'P-256',
       );
 
-      expect(valid).toBe(false);
+      assert.equal(valid, false);
     });
 
     it('should reject a P-256 signature verified with another public key', () => {
@@ -202,7 +221,7 @@ describe('SignatureService', () => {
         'P-256',
       );
 
-      expect(valid).toBe(false);
+      assert.equal(valid, false);
     });
   });
 });
