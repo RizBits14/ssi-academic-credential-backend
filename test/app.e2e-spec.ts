@@ -1728,6 +1728,18 @@ describe('SSI Academic Credential API (e2e)', () => {
     }
   });
 
+  it('rejects an unsupported organization DID key algorithm', async () => {
+    const response = await request(httpServer)
+      .post('/api/v1/dids/organization/rotate')
+      .set('Authorization', `Bearer ${issuerAuth.accessToken}`)
+      .send({
+        algorithm: 'RSA',
+      })
+      .expect(400);
+
+    expect(getError(response).success).toBe(false);
+  });
+
   it('allows only one of two concurrent issuer DID rotations to win', async () => {
     const startingDid = await prisma.did.findUnique({
       where: {

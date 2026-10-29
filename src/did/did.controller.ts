@@ -24,6 +24,8 @@ import { OrganizationType, UserRole } from '../generated/prisma/enums';
 import { OrganizationsService } from '../organizations/organizations.service';
 import { DidService } from './did.service';
 import { ChangeDidKeyDto } from './dto/change-did-key.dto';
+import { RecoverOrganizationDidKeyDto } from './dto/recover-organization-did-key.dto';
+import { RotateOrganizationDidKeyDto } from './dto/rotate-organization-did-key.dto';
 
 @ApiTags('did')
 @Controller('dids')
@@ -54,10 +56,13 @@ export class DidController {
       verificationMethod: [verificationMethod],
 
       /**
-       * The same Ed25519 key is currently authorized for:
+       * The current DID key is authorized for:
        *
-       * - authentication, which will support holder presentation proofs
+       * - authentication, which supports holder presentation proofs
        * - assertionMethod, which supports issuer credential proofs
+       *
+       * The verification method itself is represented as a Multikey, so its
+       * publicKeyMultibase identifies the underlying key type.
        *
        * These are verification-method references rather than duplicated
        * embedded key objects.
@@ -71,12 +76,16 @@ export class DidController {
   @Post('organization/rotate')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ISSUER_ADMIN, UserRole.VERIFIER_ADMIN)
-  async rotateOrganization(@Req() request: AuthenticatedRequest) {
+  async rotateOrganization(
+    @Req() request: AuthenticatedRequest,
+    @Body() dto?: RotateOrganizationDidKeyDto,
+  ) {
     const organizationId = await this.getOrganizationId(request);
 
     return this.didService.rotateForOrganization(
       organizationId,
       request.user.sub,
+      dto?.algorithm,
     );
   }
 
@@ -108,7 +117,7 @@ export class DidController {
   @Roles(UserRole.ISSUER_ADMIN, UserRole.VERIFIER_ADMIN)
   async recoverOrganization(
     @Req() request: AuthenticatedRequest,
-    @Body() dto: ChangeDidKeyDto,
+    @Body() dto?: RecoverOrganizationDidKeyDto,
   ) {
     const organizationId = await this.getOrganizationId(request);
 
@@ -116,6 +125,7 @@ export class DidController {
       organizationId,
       request.user.sub,
       dto?.reason,
+      dto?.algorithm,
     );
   }
 

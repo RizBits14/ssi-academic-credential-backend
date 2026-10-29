@@ -113,6 +113,7 @@ INTERNAL_PEM_KEY
     expect(mockDidService.rotateForOrganization).toHaveBeenCalledWith(
       'university-id',
       'issuer-admin-id',
+      undefined,
     );
   });
 
@@ -141,6 +142,7 @@ INTERNAL_PEM_KEY
       'bank-id',
       'verifier-admin-id',
       'Current bank key compromised',
+      undefined,
     );
   });
 
