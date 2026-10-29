@@ -225,6 +225,7 @@ describe('CredentialStatusService', () => {
         id: 'credential-id',
         issuerOrganizationId: 'university-id',
         status: CredentialStatus.SUSPENDED,
+        OR: [{ expiresAt: null }, { expiresAt: { gt: expect.any(Date) } }],
       },
       data: {
         status: CredentialStatus.ACTIVE,
@@ -250,6 +251,112 @@ describe('CredentialStatusService', () => {
         status: CredentialStatus.ACTIVE,
       }),
     );
+  });
+
+  it('should reject reactivation of an expired suspended credential', async () => {
+    mockPrismaService.credential.findFirst.mockResolvedValue({
+      id: 'credential-id',
+      issuerOrganizationId: 'university-id',
+      status: CredentialStatus.SUSPENDED,
+      expiresAt: new Date('2020-01-01T00:00:00.000Z'),
+    });
+
+    await expect(
+      service.reactivate({
+        credentialId: 'credential-id',
+        issuerOrganizationId: 'university-id',
+        changedBy: 'issuer-admin-id',
+      }),
+    ).rejects.toThrow('An expired credential cannot be reactivated');
+
+    expect(transactionClient.credential.updateMany).not.toHaveBeenCalled();
+
+    expect(
+      transactionClient.credentialStatusHistory.create,
+    ).not.toHaveBeenCalled();
+
+    expect(transactionClient.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it('should reactivate an unexpired suspended credential', async () => {
+    const expiresAt = new Date('2099-01-01T00:00:00.000Z');
+
+    mockPrismaService.credential.findFirst.mockResolvedValue({
+      id: 'credential-id',
+      issuerOrganizationId: 'university-id',
+      status: CredentialStatus.SUSPENDED,
+      expiresAt,
+    });
+
+    transactionClient.credential.updateMany.mockResolvedValue({
+      count: 1,
+    });
+
+    transactionClient.credential.findFirst.mockResolvedValue({
+      id: 'credential-id',
+      issuerOrganizationId: 'university-id',
+      status: CredentialStatus.ACTIVE,
+      expiresAt,
+    });
+
+    transactionClient.credentialStatusHistory.create.mockResolvedValue({
+      id: 'history-id',
+    });
+
+    transactionClient.auditLog.create.mockResolvedValue({
+      id: 'audit-id',
+    });
+
+    await expect(
+      service.reactivate({
+        credentialId: 'credential-id',
+        issuerOrganizationId: 'university-id',
+        changedBy: 'issuer-admin-id',
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        status: CredentialStatus.ACTIVE,
+      }),
+    );
+
+    expect(transactionClient.credential.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'credential-id',
+        issuerOrganizationId: 'university-id',
+        status: CredentialStatus.SUSPENDED,
+        OR: [{ expiresAt: null }, { expiresAt: { gt: expect.any(Date) } }],
+      },
+      data: {
+        status: CredentialStatus.ACTIVE,
+      },
+    });
+  });
+
+  it('should reject reactivation when the atomic update cannot complete', async () => {
+    mockPrismaService.credential.findFirst.mockResolvedValue({
+      id: 'credential-id',
+      issuerOrganizationId: 'university-id',
+      status: CredentialStatus.SUSPENDED,
+      expiresAt: new Date('2099-01-01T00:00:00.000Z'),
+    });
+
+    transactionClient.credential.updateMany.mockResolvedValue({
+      count: 0,
+    });
+
+    await expect(
+      service.reactivate({
+        credentialId: 'credential-id',
+        issuerOrganizationId: 'university-id',
+        changedBy: 'issuer-admin-id',
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+
+    expect(
+      transactionClient.credentialStatusHistory.create,
+    ).not.toHaveBeenCalled();
+
+    expect(transactionClient.auditLog.create).not.toHaveBeenCalled();
   });
 
   it('should reject reactivation of a revoked credential', async () => {

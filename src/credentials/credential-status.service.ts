@@ -76,6 +76,13 @@ export class CredentialStatusService {
       );
     }
 
+    // A suspended credential must not be reactivated after it expires.
+    if (credential.expiresAt && credential.expiresAt.getTime() <= Date.now()) {
+      throw new ConflictException(
+        'An expired credential cannot be reactivated',
+      );
+    }
+
     return this.changeStatus({
       credentialId: credential.id,
       issuerOrganizationId: input.issuerOrganizationId,
@@ -84,6 +91,7 @@ export class CredentialStatusService {
       changedBy: input.changedBy,
       reason: input.reason,
       auditAction: 'CREDENTIAL_REACTIVATED',
+      requireUnexpired: true,
     });
   }
 
@@ -172,6 +180,7 @@ export class CredentialStatusService {
     changedBy: string;
     reason?: string;
     auditAction: string;
+    requireUnexpired?: boolean;
   }) {
     return this.prisma.$transaction(async (transaction) => {
       const updateResult = await transaction.credential.updateMany({
@@ -179,6 +188,11 @@ export class CredentialStatusService {
           id: input.credentialId,
           issuerOrganizationId: input.issuerOrganizationId,
           status: input.previousStatus,
+          ...(input.requireUnexpired
+            ? {
+                OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+              }
+            : {}),
         },
         data: {
           status: input.newStatus,
