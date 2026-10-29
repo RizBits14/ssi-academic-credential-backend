@@ -28,6 +28,7 @@ interface BuildAcademicCredentialInput {
   schemaVersion: string;
 
   issuedAt: Date;
+  expiresAt?: Date;
 }
 
 interface DataIntegrityProofOptions {
@@ -61,6 +62,7 @@ export class CredentialsService {
       },
 
       validFrom: input.issuedAt.toISOString(),
+      ...(input.expiresAt ? { validUntil: input.expiresAt.toISOString() } : {}),
 
       credentialSubject: {
         id: input.holderDid,

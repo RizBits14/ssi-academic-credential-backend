@@ -1,10 +1,11 @@
-import { ConflictException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 import { AcademicRecordsService } from '../academic-records/academic-records.service';
 import { CredentialSchemasService } from '../credential-schemas/credential-schemas.service';
 import { DidService } from '../did/did.service';
 import {
+  AcademicRecordStatus,
   CredentialStatus,
   DidOwnerType,
   DidStatus,
@@ -99,6 +100,7 @@ describe('CredentialIssuanceService', () => {
 
     mockAcademicRecordsService.findByIdForUniversity.mockResolvedValue({
       id: 'record-id',
+      status: AcademicRecordStatus.ACTIVE,
       universityId: 'university-id',
       holderId: 'holder-id',
       studentId: '20260001',
@@ -162,11 +164,18 @@ describe('CredentialIssuanceService', () => {
       keyId: 'v1',
     });
 
+    const expiresAt = new Date('2099-01-01T00:00:00.000Z');
+
     const result = await service.prepare({
       issuerOrganizationId: 'university-id',
       academicRecordId: 'record-id',
       schemaId: 'schema-id',
+      expiresAt,
     });
+
+    expect(
+      mockCredentialsService.buildUnsignedAcademicCredential,
+    ).toHaveBeenCalledWith(expect.objectContaining({ expiresAt }));
 
     expect(
       mockCredentialSchemasService.findByIdForOrganization,
@@ -228,6 +237,59 @@ describe('CredentialIssuanceService', () => {
       mockAcademicRecordsService.findByIdForUniversity,
     ).not.toHaveBeenCalled();
   });
+
+  it.each([AcademicRecordStatus.WITHDRAWN, AcademicRecordStatus.INVALID])(
+    'should reject credential issuance for %s academic records',
+    async (status) => {
+      mockOrganizationsService.findById.mockResolvedValue({
+        id: 'university-id',
+        type: OrganizationType.UNIVERSITY,
+        status: OrganizationStatus.ACTIVE,
+      });
+      mockAcademicRecordsService.findByIdForUniversity.mockResolvedValue({
+        id: 'record-id',
+        status,
+      });
+
+      await expect(
+        service.prepare({
+          issuerOrganizationId: 'university-id',
+          academicRecordId: 'record-id',
+          schemaId: 'schema-id',
+        }),
+      ).rejects.toBeInstanceOf(ConflictException);
+
+      expect(
+        mockCredentialSchemasService.findByIdForOrganization,
+      ).not.toHaveBeenCalled();
+      expect(mockCredentialsService.addIssuerProof).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([new Date('2020-01-01T00:00:00.000Z'), new Date(NaN)])(
+    'should reject invalid or expired credential expiration %s',
+    async (expiresAt) => {
+      mockOrganizationsService.findById.mockResolvedValue({
+        id: 'university-id',
+        type: OrganizationType.UNIVERSITY,
+        status: OrganizationStatus.ACTIVE,
+      });
+
+      await expect(
+        service.prepare({
+          issuerOrganizationId: 'university-id',
+          academicRecordId: 'record-id',
+          schemaId: 'schema-id',
+          expiresAt,
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      expect(
+        mockAcademicRecordsService.findByIdForUniversity,
+      ).not.toHaveBeenCalled();
+      expect(mockCredentialsService.addIssuerProof).not.toHaveBeenCalled();
+    },
+  );
 
   it('should persist issuance records and audit log in one transaction', async () => {
     const preparedCredential = {

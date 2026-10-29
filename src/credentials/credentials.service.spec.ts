@@ -97,6 +97,27 @@ describe('CredentialsService', () => {
     });
   });
 
+  it('should include credential expiry in issuer-signed credential data', () => {
+    const expiresAt = new Date('2099-01-01T00:00:00.000Z');
+    const credential = service.buildUnsignedAcademicCredential({
+      issuerDid,
+      issuerName: 'Example University',
+      holderDid: 'did:example:holder',
+      fullName: 'Sample Student',
+      studentId: '20260001',
+      degree: 'Bachelor of Science',
+      major: 'Computer Science',
+      graduationYear: 2026,
+      schemaName: 'AcademicCredential',
+      schemaVersion: '1.0',
+      issuedAt: new Date('2026-10-19T12:00:00.000Z'),
+      expiresAt,
+    });
+
+    expect(credential.validUntil).toBe(expiresAt.toISOString());
+    expect(credential.validFrom).toBe('2026-10-19T12:00:00.000Z');
+  });
+
   it('should omit optional academic fields when they are not provided', () => {
     const credential = service.buildUnsignedAcademicCredential({
       issuerDid,
@@ -112,6 +133,7 @@ describe('CredentialsService', () => {
       issuedAt: new Date('2026-10-19T12:00:00.000Z'),
     });
 
+    expect(credential).not.toHaveProperty('validUntil');
     expect(credential.credentialSubject).not.toHaveProperty('department');
     expect(credential.credentialSubject).not.toHaveProperty('cgpa');
   });

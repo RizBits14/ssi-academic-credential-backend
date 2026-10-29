@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -10,6 +11,7 @@ import { CredentialSchemasService } from '../credential-schemas/credential-schem
 import { DidService } from '../did/did.service';
 import type { Prisma } from '../generated/prisma/client';
 import {
+  AcademicRecordStatus,
   CredentialStatus,
   DidOwnerType,
   DidStatus,
@@ -61,11 +63,32 @@ export class CredentialIssuanceService {
       throw new ConflictException('Issuer organization is not active');
     }
 
+    const issuedAt = new Date();
+
+    if (
+      input.expiresAt &&
+      (!Number.isFinite(input.expiresAt.getTime()) ||
+        input.expiresAt.getTime() <= issuedAt.getTime())
+    ) {
+      throw new BadRequestException(
+        'Credential expiration must be a valid future date',
+      );
+    }
+
     const academicRecord =
       await this.academicRecordsService.findByIdForUniversity(
         input.academicRecordId,
         organization.id,
       );
+
+    if (
+      academicRecord.status !== AcademicRecordStatus.ACTIVE &&
+      academicRecord.status !== AcademicRecordStatus.GRADUATED
+    ) {
+      throw new ConflictException(
+        'Cannot issue a credential for a withdrawn or invalid academic record',
+      );
+    }
 
     const schema = await this.credentialSchemasService.findByIdForOrganization(
       input.schemaId,
@@ -118,8 +141,6 @@ export class CredentialIssuanceService {
 
     this.credentialSchemasService.validateClaims(schema.schemaJson, claims);
 
-    const issuedAt = new Date();
-
     const unsignedCredential =
       this.credentialsService.buildUnsignedAcademicCredential({
         issuerDid: issuerDid.did,
@@ -135,6 +156,7 @@ export class CredentialIssuanceService {
         schemaName: schema.name,
         schemaVersion: schema.version,
         issuedAt,
+        expiresAt: input.expiresAt,
       });
 
     const credentialHash =
