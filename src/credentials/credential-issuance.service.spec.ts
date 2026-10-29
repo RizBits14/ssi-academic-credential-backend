@@ -244,9 +244,11 @@ describe('CredentialIssuanceService', () => {
       signedCredential: {
         id: 'urn:uuid:credential-123',
         proof: {
-          type: 'Ed25519Signature',
+          type: 'DataIntegrityProof' as const,
+          cryptosuite: 'eddsa-jcs-2022' as const,
           created: '2026-09-15T00:00:00.000Z',
           verificationMethod: 'did:mock:university:123#key-1',
+          proofPurpose: 'assertionMethod' as const,
           proofValue: 'signature',
         },
       },
@@ -259,7 +261,6 @@ describe('CredentialIssuanceService', () => {
     };
 
     jest.spyOn(service, 'prepare').mockResolvedValueOnce(preparedCredential);
-
     mockTransactionClient.credential.create.mockResolvedValue({
       id: 'credential-db-id',
       vcId: preparedCredential.vcId,
