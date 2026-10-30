@@ -19,6 +19,7 @@ import { ApiProtectedEndpoint } from '../common/swagger/api-endpoint.decorator';
 import { OrganizationType, UserRole } from '../generated/prisma/enums';
 import { OrganizationsService } from '../organizations/organizations.service';
 import { ApproveVerificationRequestDto } from './dto/approve-verification-request.dto';
+import { ApproveClientPresentationDto } from './dto/approve-client-presentation.dto';
 import { CreateVerificationRequestDto } from './dto/create-verification-request.dto';
 import { VerificationRequestsService } from './verification-requests.service';
 
@@ -64,6 +65,47 @@ export class VerificationRequestsController {
       holderId: request.user.sub,
       credentialId: dto.credentialId,
       approvedClaims: dto.approvedClaims,
+    });
+  }
+
+  @ApiProtectedEndpoint(
+    'Prepare a holder-signed credential presentation payload',
+    201,
+  )
+  @Post(':id/prepare-client')
+  @Roles(UserRole.HOLDER)
+  prepareClient(
+    @Req() request: AuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ApproveVerificationRequestDto,
+  ) {
+    return this.verificationRequestsService.prepareClientApproval({
+      requestId: id,
+      holderId: request.user.sub,
+      credentialId: dto.credentialId,
+      approvedClaims: dto.approvedClaims,
+    });
+  }
+
+  @ApiProtectedEndpoint(
+    'Approve a request using the holder-owned Ed25519 signature',
+    201,
+  )
+  @Post(':id/approve-client')
+  @Roles(UserRole.HOLDER)
+  approveClient(
+    @Req() request: AuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ApproveClientPresentationDto,
+  ) {
+    return this.verificationRequestsService.approveClient({
+      requestId: id,
+      holderId: request.user.sub,
+      credentialId: dto.credentialId,
+      approvedClaims: dto.approvedClaims,
+      presentationId: dto.presentationId,
+      created: dto.created,
+      proofValue: dto.proofValue,
     });
   }
 

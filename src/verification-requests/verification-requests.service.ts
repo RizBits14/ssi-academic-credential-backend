@@ -5,14 +5,22 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import {
+  createHash,
+  createPublicKey,
+  randomBytes,
+  randomUUID,
+  verify as verifyEd25519,
+} from 'node:crypto';
 
 import { canonicalizeJson } from '../common/utils/json-canonicalization.util';
 import { EncryptionService } from '../crypto/encryption.service';
 import { DidService } from '../did/did.service';
 import type { Prisma } from '../generated/prisma/client';
 import {
+  DidKeyStatus,
   DidOwnerType,
+  DidStatus,
   EducationVerificationStatus,
   VerificationRequestStatus,
 } from '../generated/prisma/enums';
@@ -33,6 +41,17 @@ interface ApproveVerificationRequestInput {
   approvedClaims: string[];
 }
 
+interface PrepareClientPresentationInput extends ApproveVerificationRequestInput {
+  presentationId?: string;
+  created?: string;
+}
+
+interface ApproveClientPresentationInput extends ApproveVerificationRequestInput {
+  presentationId: string;
+  created: string;
+  proofValue: string;
+}
+
 interface VerificationSession {
   applicationId: string;
   holderId: string;
@@ -41,7 +60,7 @@ interface VerificationSession {
   requestedClaims: string[];
 }
 
-interface HolderDataIntegrityProofOptions {
+export interface HolderDataIntegrityProofOptions {
   type: 'DataIntegrityProof';
   cryptosuite: 'eddsa-jcs-2022';
   created: string;
@@ -389,6 +408,352 @@ export class VerificationRequestsService {
       status: VerificationRequestStatus.APPROVED,
       disclosedClaims,
     };
+  }
+
+  /**
+   * Produces a deterministic, request-bound EdDSA-JCS-2022 signing payload.
+   * No private key or presentation is created on the backend.
+   *
+   * The client signs signingPayloadBase64url (decoded to 64 bytes), then
+   * submits the returned presentationId and created timestamp unchanged.
+   */
+  async prepareClientApproval(input: PrepareClientPresentationInput) {
+    const request = await this.prisma.verificationRequest.findFirst({
+      where: { id: input.requestId, holderId: input.holderId },
+    });
+
+    if (!request) {
+      throw new NotFoundException('Verification request not found');
+    }
+
+    await this.ensurePendingAndActive(
+      request.id,
+      request.status,
+      request.expiresAt,
+    );
+
+    const session = await this.redis.getJson<VerificationSession>(
+      `verification-request:${request.id}`,
+    );
+
+    if (!session) {
+      await this.expireRequest(request.id);
+      throw new BadRequestException('Verification request has expired');
+    }
+
+    const storedRequestedClaims = request.requestedClaims;
+
+    if (
+      !Array.isArray(storedRequestedClaims) ||
+      !storedRequestedClaims.every(
+        (claim: unknown) => typeof claim === 'string',
+      ) ||
+      !Array.isArray(session.requestedClaims) ||
+      !session.requestedClaims.every(
+        (claim: unknown) => typeof claim === 'string',
+      ) ||
+      session.holderId !== input.holderId ||
+      session.applicationId !== request.applicationId ||
+      session.requestedClaims.length !== storedRequestedClaims.length ||
+      session.requestedClaims.some(
+        (claim, index) => claim !== storedRequestedClaims[index],
+      ) ||
+      typeof session.nonce !== 'string' ||
+      createHash('sha256').update(session.nonce).digest('hex') !==
+        request.nonceHash
+    ) {
+      throw new ForbiddenException(
+        'Verification session does not match request',
+      );
+    }
+
+    const approvedClaims = this.validateApprovedClaims(
+      input.approvedClaims,
+      request.requestedClaims,
+    );
+
+    const walletCredential = await this.prisma.walletCredential.findFirst({
+      where: {
+        credentialId: input.credentialId,
+        holderId: input.holderId,
+      },
+    });
+
+    if (!walletCredential) {
+      throw new NotFoundException('Credential not found in holder wallet');
+    }
+
+    const decryptedCredential = this.encryptionService.decryptForWallet({
+      ciphertext: walletCredential.ciphertext,
+      iv: walletCredential.iv,
+      authTag: walletCredential.authTag,
+      keyId: walletCredential.encryptionKeyId,
+    });
+
+    const disclosedClaims = this.extractDisclosedClaims(
+      decryptedCredential,
+      approvedClaims,
+    ) as Prisma.InputJsonObject;
+
+    const didRecord = await this.didService.findPublicByOwner(
+      DidOwnerType.USER,
+      input.holderId,
+    );
+
+    if (!didRecord || didRecord.status !== DidStatus.ACTIVE) {
+      throw new NotFoundException('Active holder DID not found');
+    }
+
+    // Client-only enrollment must never silently fall back to server custody.
+    const clientOwnedKey = await this.prisma.didKey.findFirst({
+      where: {
+        didId: didRecord.id,
+        version: didRecord.currentKeyVersion,
+        status: DidKeyStatus.ACTIVE,
+        algorithm: 'Ed25519',
+        encryptedPrivateKey: null,
+        iv: null,
+        authTag: null,
+      },
+      select: { id: true },
+    });
+
+    if (!clientOwnedKey) {
+      throw new ConflictException(
+        'Holder DID does not have an active client-owned signing key',
+      );
+    }
+
+    const resolvedDid = await this.didService.resolveDid(didRecord.did);
+    const verificationMethod = `${didRecord.did}#key-${didRecord.currentKeyVersion}`;
+
+    if (resolvedDid.verificationMethod.id !== verificationMethod) {
+      throw new ConflictException('Holder DID key changed; retry preparation');
+    }
+
+    const presentationId = input.presentationId ?? randomUUID();
+    const created = input.created ?? new Date().toISOString();
+
+    if (
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        presentationId,
+      )
+    ) {
+      throw new BadRequestException('Invalid presentation ID');
+    }
+
+    const createdMs = Date.parse(created);
+    if (
+      !Number.isFinite(createdMs) ||
+      new Date(createdMs).toISOString() !== created ||
+      createdMs > Date.now() + 30_000 ||
+      createdMs < Date.now() - this.ttlSeconds * 1000 ||
+      createdMs > request.expiresAt.getTime()
+    ) {
+      throw new BadRequestException(
+        'Presentation signing timestamp is invalid',
+      );
+    }
+
+    const unsecuredPresentation = {
+      presentationId,
+      requestId: request.id,
+      credentialId: input.credentialId,
+      holderDid: didRecord.did,
+      disclosedClaims,
+    };
+
+    const presentationHash = createHash('sha256')
+      .update(this.canonicalize(unsecuredPresentation), 'utf8')
+      .digest('hex');
+
+    const proofOptions: HolderDataIntegrityProofOptions = {
+      type: 'DataIntegrityProof',
+      cryptosuite: 'eddsa-jcs-2022',
+      created,
+      verificationMethod,
+      proofPurpose: 'authentication',
+      challenge: session.nonce,
+      domain: session.bankId,
+    };
+
+    const hashData = this.createEddsaJcs2022HashData(
+      unsecuredPresentation,
+      proofOptions,
+    );
+
+    return {
+      presentationId,
+      requestId: request.id,
+      applicationId: request.applicationId,
+      credentialId: input.credentialId,
+      approvedClaims,
+      holderDid: didRecord.did,
+      disclosedClaims,
+      presentationHash,
+      proofOptions,
+      signingPayloadBase64url: hashData.toString('base64url'),
+      expiresAt: request.expiresAt.toISOString(),
+      // Internal values used only to commit atomically; not returned to clients.
+      // They are constructed from the stored request and wallet credential.
+    };
+  }
+
+  async approveClient(input: ApproveClientPresentationInput) {
+    // Rebuild rather than trust a submitted unsigned presentation, claims,
+    // challenge, domain, or DID verification method.
+    const prepared = await this.prepareClientApproval(input);
+
+    const signature = this.decodeClientProofValue(input.proofValue);
+    const resolvedDid = await this.didService.resolveDid(prepared.holderDid);
+
+    if (
+      resolvedDid.verificationMethod.id !==
+      prepared.proofOptions.verificationMethod
+    ) {
+      throw new ConflictException('Holder DID key changed; retry approval');
+    }
+
+    const valid = verifyEd25519(
+      null,
+      Buffer.from(prepared.signingPayloadBase64url, 'base64url'),
+      createPublicKey(resolvedDid.verificationMethod.publicKey),
+      signature,
+    );
+
+    if (!valid) {
+      throw new BadRequestException('Holder presentation signature is invalid');
+    }
+
+    const presentation = await this.prisma.$transaction(async (transaction) => {
+      const transition = await transaction.verificationRequest.updateMany({
+        where: {
+          id: input.requestId,
+          holderId: input.holderId,
+          status: VerificationRequestStatus.PENDING,
+          expiresAt: { gt: new Date() },
+        },
+        data: { status: VerificationRequestStatus.APPROVED },
+      });
+
+      if (transition.count !== 1) {
+        throw new ConflictException(
+          'Verification request is no longer pending or has expired',
+        );
+      }
+
+      const createdPresentation = await transaction.presentation.create({
+        data: {
+          id: prepared.presentationId,
+          requestId: input.requestId,
+          credentialId: input.credentialId,
+          holderId: input.holderId,
+          holderDid: prepared.holderDid,
+          disclosedClaims: prepared.disclosedClaims,
+          nonce: prepared.proofOptions.challenge,
+          presentationHash: prepared.presentationHash,
+          holderProof: {
+            ...prepared.proofOptions,
+            proofValue: input.proofValue,
+          },
+        },
+      });
+
+      await transaction.auditLog.create({
+        data: {
+          actorId: input.holderId,
+          organizationId: prepared.proofOptions.domain,
+          action: 'CREDENTIAL_REQUEST_APPROVED',
+          resourceType: 'VerificationRequest',
+          resourceId: input.requestId,
+          metadata: {
+            applicationId: prepared.applicationId,
+            credentialId: input.credentialId,
+            approvedClaims: prepared.approvedClaims,
+            signingCustody: 'CLIENT',
+          },
+        },
+      });
+
+      await transaction.auditLog.create({
+        data: {
+          actorId: input.holderId,
+          organizationId: prepared.proofOptions.domain,
+          action: 'PRESENTATION_CREATED',
+          resourceType: 'Presentation',
+          resourceId: createdPresentation.id,
+          metadata: {
+            requestId: input.requestId,
+            applicationId: prepared.applicationId,
+            credentialId: input.credentialId,
+            disclosedClaimNames: prepared.approvedClaims,
+            signingCustody: 'CLIENT',
+          },
+        },
+      });
+
+      return createdPresentation;
+    });
+
+    return {
+      presentationId: presentation.id,
+      requestId: input.requestId,
+      status: VerificationRequestStatus.APPROVED,
+      disclosedClaims: prepared.disclosedClaims,
+    };
+  }
+
+  private decodeClientProofValue(value: string): Buffer {
+    if (
+      typeof value !== 'string' ||
+      !value.startsWith('z') ||
+      value.length > 128
+    ) {
+      throw new BadRequestException(
+        'Holder presentation proof value is invalid',
+      );
+    }
+
+    const alphabet =
+      '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+    const encoded = value.slice(1);
+    if (!encoded) {
+      throw new BadRequestException(
+        'Holder presentation proof value is invalid',
+      );
+    }
+
+    let numericValue = 0n;
+    for (const character of encoded) {
+      const digit = alphabet.indexOf(character);
+      if (digit < 0) {
+        throw new BadRequestException(
+          'Holder presentation proof value is invalid',
+        );
+      }
+      numericValue = numericValue * 58n + BigInt(digit);
+    }
+
+    const decodedBytes: number[] = [];
+    while (numericValue > 0n) {
+      decodedBytes.push(Number(numericValue % 256n));
+      numericValue /= 256n;
+    }
+    decodedBytes.reverse();
+
+    const leadingZeroCount = encoded.match(/^1*/)?.[0].length ?? 0;
+    const decoded = Buffer.concat([
+      Buffer.alloc(leadingZeroCount),
+      Buffer.from(decodedBytes),
+    ]);
+
+    if (decoded.length !== 64) {
+      throw new BadRequestException(
+        'Holder presentation proof value is invalid',
+      );
+    }
+
+    return decoded;
   }
 
   async reject(requestId: string, holderId: string) {
