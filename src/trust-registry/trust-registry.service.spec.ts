@@ -1,3 +1,4 @@
+import { ConflictException } from '@nestjs/common';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 import { DidService } from '../did/did.service';
@@ -15,7 +16,8 @@ describe('TrustRegistryService', () => {
   const transactionClient = {
     trustedIssuer: {
       create: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
-      update: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+      updateMany: jest.fn<(...args: unknown[]) => Promise<{ count: number }>>(),
+      findUnique: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
     },
     auditLog: {
       create: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
@@ -181,7 +183,11 @@ describe('TrustRegistryService', () => {
       status: TrustedIssuerStatus.TRUSTED,
     });
 
-    transactionClient.trustedIssuer.update.mockResolvedValue({
+    transactionClient.trustedIssuer.updateMany.mockResolvedValue({
+      count: 1,
+    });
+
+    transactionClient.trustedIssuer.findUnique.mockResolvedValue({
       id: 'trusted-issuer-id',
       issuerDid: 'did:mock:university:123',
       status: TrustedIssuerStatus.SUSPENDED,
@@ -194,9 +200,10 @@ describe('TrustRegistryService', () => {
 
     const result = await service.suspend('trusted-issuer-id', 'admin-id');
 
-    expect(transactionClient.trustedIssuer.update).toHaveBeenCalledWith({
+    expect(transactionClient.trustedIssuer.updateMany).toHaveBeenCalledWith({
       where: {
         id: 'trusted-issuer-id',
+        status: TrustedIssuerStatus.TRUSTED,
       },
       data: {
         status: TrustedIssuerStatus.SUSPENDED,
@@ -222,6 +229,57 @@ describe('TrustRegistryService', () => {
         status: TrustedIssuerStatus.SUSPENDED,
       }),
     );
+  });
+
+  it('should reject suspension if another request changed the trust status first', async () => {
+    mockPrismaService.trustedIssuer.findUnique.mockResolvedValue({
+      id: 'trusted-issuer-id',
+      organizationId: 'university-id',
+      issuerDid: 'did:mock:university:123',
+      status: TrustedIssuerStatus.TRUSTED,
+    });
+
+    transactionClient.trustedIssuer.updateMany.mockResolvedValue({
+      count: 0,
+    });
+
+    await expect(
+      service.suspend('trusted-issuer-id', 'admin-id'),
+    ).rejects.toBeInstanceOf(ConflictException);
+
+    expect(transactionClient.trustedIssuer.findUnique).not.toHaveBeenCalled();
+    expect(transactionClient.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it('should propagate an audit failure so the transaction can roll back', async () => {
+    mockPrismaService.trustedIssuer.findUnique.mockResolvedValue({
+      id: 'trusted-issuer-id',
+      organizationId: 'university-id',
+      issuerDid: 'did:mock:university:123',
+      status: TrustedIssuerStatus.TRUSTED,
+    });
+
+    transactionClient.trustedIssuer.updateMany.mockResolvedValue({
+      count: 1,
+    });
+
+    transactionClient.trustedIssuer.findUnique.mockResolvedValue({
+      id: 'trusted-issuer-id',
+      organizationId: 'university-id',
+      issuerDid: 'did:mock:university:123',
+      status: TrustedIssuerStatus.SUSPENDED,
+    });
+
+    transactionClient.auditLog.create.mockRejectedValue(
+      new Error('Audit database operation failed'),
+    );
+
+    await expect(
+      service.suspend('trusted-issuer-id', 'admin-id'),
+    ).rejects.toThrow('Audit database operation failed');
+
+    expect(mockPrismaService.$transaction).toHaveBeenCalledTimes(1);
+    expect(transactionClient.auditLog.create).toHaveBeenCalledTimes(1);
   });
 
   it('should reject suspending an already suspended issuer', async () => {

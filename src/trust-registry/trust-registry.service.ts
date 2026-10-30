@@ -172,15 +172,31 @@ export class TrustRegistryService {
     }
 
     return this.prisma.$transaction(async (transaction) => {
-      const updated = await transaction.trustedIssuer.update({
+      // Only one concurrent suspension can change TRUSTED to SUSPENDED.
+      const updateResult = await transaction.trustedIssuer.updateMany({
         where: {
           id,
+          status: TrustedIssuerStatus.TRUSTED,
         },
         data: {
           status: TrustedIssuerStatus.SUSPENDED,
           suspendedAt: new Date(),
         },
       });
+
+      if (updateResult.count !== 1) {
+        throw new ConflictException(
+          'Trusted issuer status changed; retry request',
+        );
+      }
+
+      const updated = await transaction.trustedIssuer.findUnique({
+        where: { id },
+      });
+
+      if (!updated) {
+        throw new NotFoundException('Trusted issuer not found');
+      }
 
       await transaction.auditLog.create({
         data: {
