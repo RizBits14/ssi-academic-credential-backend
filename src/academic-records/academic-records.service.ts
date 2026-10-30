@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 
 import type { Prisma } from '../generated/prisma/client';
 import { AcademicRecordStatus } from '../generated/prisma/enums';
@@ -90,20 +94,62 @@ export class AcademicRecordsService {
     id: string,
     universityId: string,
     input: UpdateAcademicRecordInput,
+    actorId: string,
   ) {
-    const result = await this.prisma.academicRecord.updateMany({
-      where: {
-        id,
-        universityId,
-      },
-      data: input,
-    });
+    const changes = Object.fromEntries(
+      Object.entries(input).filter(([, value]) => value !== undefined),
+    ) as UpdateAcademicRecordInput;
 
-    if (result.count !== 1) {
-      throw new NotFoundException('Academic record not found');
+    const changedFields = Object.keys(changes);
+
+    if (changedFields.length === 0) {
+      throw new BadRequestException(
+        'At least one academic record field must be provided',
+      );
     }
 
-    return this.findByIdForUniversity(id, universityId);
+    return this.prisma.$transaction(async (transaction) => {
+      const result = await transaction.academicRecord.updateMany({
+        where: {
+          id,
+          universityId,
+        },
+        data: changes,
+      });
+
+      if (result.count !== 1) {
+        throw new NotFoundException('Academic record not found');
+      }
+
+      const updatedRecord = await transaction.academicRecord.findFirst({
+        where: {
+          id,
+          universityId,
+        },
+      });
+
+      if (!updatedRecord) {
+        throw new NotFoundException('Academic record not found');
+      }
+
+      await transaction.auditLog.create({
+        data: {
+          actorId,
+          organizationId: universityId,
+          action: 'ACADEMIC_RECORD_UPDATED',
+          resourceType: 'AcademicRecord',
+          resourceId: id,
+          metadata: {
+            changedFields,
+            ...(changes.status !== undefined
+              ? { newStatus: changes.status }
+              : {}),
+          },
+        },
+      });
+
+      return updatedRecord;
+    });
   }
 
   async findByUniversityPaginated(input: {

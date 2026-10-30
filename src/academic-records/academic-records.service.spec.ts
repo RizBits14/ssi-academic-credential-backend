@@ -1,6 +1,7 @@
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
+import { AcademicRecordStatus } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
 import { AcademicRecordsService } from './academic-records.service';
 
@@ -8,6 +9,8 @@ describe('AcademicRecordsService', () => {
   const transactionClient = {
     academicRecord: {
       create: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+      updateMany: jest.fn<(...args: unknown[]) => Promise<{ count: number }>>(),
+      findFirst: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
     },
 
     auditLog: {
@@ -20,7 +23,6 @@ describe('AcademicRecordsService', () => {
       findFirst: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
       findMany: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
       count: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
-      updateMany: jest.fn<(...args: unknown[]) => Promise<{ count: number }>>(),
     },
 
     $transaction: jest.fn(
@@ -160,24 +162,36 @@ describe('AcademicRecordsService', () => {
     expect(result).toEqual([]);
   });
 
-  it('should update an academic record only within the specified university', async () => {
+  it('should update an academic record and write an audit log atomically', async () => {
     const updatedRecord = {
       id: 'record-id',
       universityId: 'university-id',
       major: 'Software Engineering',
     };
 
-    mockPrisma.academicRecord.updateMany.mockResolvedValue({
+    transactionClient.academicRecord.updateMany.mockResolvedValue({
       count: 1,
     });
 
-    mockPrisma.academicRecord.findFirst.mockResolvedValue(updatedRecord);
+    transactionClient.academicRecord.findFirst.mockResolvedValue(updatedRecord);
 
-    const result = await service.update('record-id', 'university-id', {
-      major: 'Software Engineering',
+    transactionClient.auditLog.create.mockResolvedValue({
+      id: 'audit-id',
     });
 
-    expect(mockPrisma.academicRecord.updateMany).toHaveBeenCalledWith({
+    const result = await service.update(
+      'record-id',
+      'university-id',
+      {
+        major: 'Software Engineering',
+        fullName: undefined,
+      },
+      'issuer-admin-id',
+    );
+
+    expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+
+    expect(transactionClient.academicRecord.updateMany).toHaveBeenCalledWith({
       where: {
         id: 'record-id',
         universityId: 'university-id',
@@ -187,20 +201,135 @@ describe('AcademicRecordsService', () => {
       },
     });
 
+    expect(transactionClient.academicRecord.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: 'record-id',
+        universityId: 'university-id',
+      },
+    });
+
+    expect(transactionClient.auditLog.create).toHaveBeenCalledWith({
+      data: {
+        actorId: 'issuer-admin-id',
+        organizationId: 'university-id',
+        action: 'ACADEMIC_RECORD_UPDATED',
+        resourceType: 'AcademicRecord',
+        resourceId: 'record-id',
+        metadata: {
+          changedFields: ['major'],
+        },
+      },
+    });
+
     expect(result).toEqual(updatedRecord);
   });
 
   it('should reject updates to records outside the specified university', async () => {
-    mockPrisma.academicRecord.updateMany.mockResolvedValue({
+    transactionClient.academicRecord.updateMany.mockResolvedValue({
       count: 0,
     });
 
     await expect(
-      service.update('record-from-another-university', 'university-id', {
-        major: 'Software Engineering',
-      }),
+      service.update(
+        'record-from-another-university',
+        'university-id',
+        {
+          major: 'Software Engineering',
+        },
+        'issuer-admin-id',
+      ),
     ).rejects.toBeInstanceOf(NotFoundException);
 
-    expect(mockPrisma.academicRecord.findFirst).not.toHaveBeenCalled();
+    expect(transactionClient.academicRecord.findFirst).not.toHaveBeenCalled();
+
+    expect(transactionClient.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it('should record the new status when an academic record status changes', async () => {
+    transactionClient.academicRecord.updateMany.mockResolvedValue({
+      count: 1,
+    });
+
+    transactionClient.academicRecord.findFirst.mockResolvedValue({
+      id: 'record-id',
+      universityId: 'university-id',
+      status: AcademicRecordStatus.WITHDRAWN,
+    });
+
+    transactionClient.auditLog.create.mockResolvedValue({
+      id: 'audit-id',
+    });
+
+    await service.update(
+      'record-id',
+      'university-id',
+      {
+        status: AcademicRecordStatus.WITHDRAWN,
+      },
+      'issuer-admin-id',
+    );
+
+    expect(transactionClient.auditLog.create).toHaveBeenCalledWith({
+      data: {
+        actorId: 'issuer-admin-id',
+        organizationId: 'university-id',
+        action: 'ACADEMIC_RECORD_UPDATED',
+        resourceType: 'AcademicRecord',
+        resourceId: 'record-id',
+        metadata: {
+          changedFields: ['status'],
+          newStatus: AcademicRecordStatus.WITHDRAWN,
+        },
+      },
+    });
+  });
+
+  it('should reject updates without any supplied fields', async () => {
+    await expect(
+      service.update(
+        'record-id',
+        'university-id',
+        {
+          fullName: undefined,
+          major: undefined,
+        },
+        'issuer-admin-id',
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+
+    expect(transactionClient.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it('should reject the update if audit logging fails', async () => {
+    transactionClient.academicRecord.updateMany.mockResolvedValue({
+      count: 1,
+    });
+
+    transactionClient.academicRecord.findFirst.mockResolvedValue({
+      id: 'record-id',
+      universityId: 'university-id',
+      major: 'Software Engineering',
+    });
+
+    transactionClient.auditLog.create.mockRejectedValue(
+      new Error('Audit write unavailable'),
+    );
+
+    await expect(
+      service.update(
+        'record-id',
+        'university-id',
+        {
+          major: 'Software Engineering',
+        },
+        'issuer-admin-id',
+      ),
+    ).rejects.toThrow('Audit write unavailable');
+
+    expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+
+    expect(transactionClient.auditLog.create).toHaveBeenCalledTimes(1);
   });
 });

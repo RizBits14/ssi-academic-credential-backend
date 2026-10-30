@@ -96,18 +96,23 @@ export class AcademicRecordsController {
   ) {
     const universityId = await this.getUniversityId(request.user.sub);
 
-    return this.academicRecordsService.update(id, universityId, {
-      fullName: dto.fullName,
-      degree: dto.degree,
-      department: dto.department,
-      major: dto.major,
-      cgpa: dto.cgpa,
-      graduationYear: dto.graduationYear,
-      graduationDate: dto.graduationDate
-        ? new Date(dto.graduationDate)
-        : undefined,
-      status: dto.status,
-    });
+    return this.academicRecordsService.update(
+      id,
+      universityId,
+      {
+        fullName: dto.fullName,
+        degree: dto.degree,
+        department: dto.department,
+        major: dto.major,
+        cgpa: dto.cgpa,
+        graduationYear: dto.graduationYear,
+        graduationDate: dto.graduationDate
+          ? new Date(dto.graduationDate)
+          : undefined,
+        status: dto.status,
+      },
+      request.user.sub,
+    );
   }
 
   private async getUniversityId(userId: string): Promise<string> {
