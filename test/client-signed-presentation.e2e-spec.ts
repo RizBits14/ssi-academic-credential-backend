@@ -609,4 +609,148 @@ describe('Client-signed presentation (e2e)', () => {
       }),
     ).toBe(1);
   });
+
+  it('rejects a client-signed presentation with modified disclosed claims', async () => {
+    const id = await newRequest();
+    const prepared = await prepare(id);
+
+    await request(server)
+      .post(`/api/v1/verification-requests/${id}/approve-client`)
+      .set('Authorization', `Bearer ${holderToken}`)
+      .send(approvalBody(prepared))
+      .expect(201);
+
+    await prisma.presentation.update({
+      where: { id: prepared.presentationId },
+      data: {
+        disclosedClaims: {
+          degree: 'Forged Academic Degree',
+          major: 'Computer Science',
+          cgpa: 3.75,
+        },
+      },
+    });
+
+    await request(server)
+      .post(
+        `/api/v1/verification/presentations/${prepared.presentationId}/verify`,
+      )
+      .set('Authorization', `Bearer ${verifierToken}`)
+      .expect(422);
+
+    const stored = await prisma.verificationRequest.findUnique({
+      where: { id },
+    });
+
+    expect(stored?.status).toBe(VerificationRequestStatus.FAILED);
+
+    const result = await prisma.verificationResult.findUnique({
+      where: { presentationId: prepared.presentationId },
+    });
+
+    expect(result?.finalResult).toBe('FAILED');
+    expect(result?.hashValid).toBe(false);
+  });
+
+  it('rejects a presentation whose holder signature was replaced', async () => {
+    const id = await newRequest();
+    const prepared = await prepare(id);
+
+    await request(server)
+      .post(`/api/v1/verification-requests/${id}/approve-client`)
+      .set('Authorization', `Bearer ${holderToken}`)
+      .send(approvalBody(prepared))
+      .expect(201);
+
+    await prisma.presentation.update({
+      where: { id: prepared.presentationId },
+      data: {
+        holderProof: {
+          ...prepared.proofOptions,
+          proofValue: approvalBody(prepared, true).proofValue,
+        },
+      },
+    });
+
+    await request(server)
+      .post(
+        `/api/v1/verification/presentations/${prepared.presentationId}/verify`,
+      )
+      .set('Authorization', `Bearer ${verifierToken}`)
+      .expect(422);
+
+    const stored = await prisma.verificationRequest.findUnique({
+      where: { id },
+    });
+
+    expect(stored?.status).toBe(VerificationRequestStatus.FAILED);
+
+    const result = await prisma.verificationResult.findUnique({
+      where: { presentationId: prepared.presentationId },
+    });
+
+    expect(result?.finalResult).toBe('FAILED');
+    expect(result?.holderProofValid).toBe(false);
+  });
+
+  it('rejects changes to the signed presentation timestamp', async () => {
+    const id = await newRequest();
+    const prepared = await prepare(id);
+    const body = approvalBody(prepared);
+
+    const modifiedTimestamp = new Date(
+      new Date(prepared.proofOptions.created).getTime() + 1000,
+    ).toISOString();
+
+    await request(server)
+      .post(`/api/v1/verification-requests/${id}/approve-client`)
+      .set('Authorization', `Bearer ${holderToken}`)
+      .send({
+        ...body,
+        created: modifiedTimestamp,
+      })
+      .expect(400);
+
+    const stored = await prisma.verificationRequest.findUnique({
+      where: { id },
+    });
+
+    expect(stored?.status).toBe(VerificationRequestStatus.PENDING);
+
+    expect(
+      await prisma.presentation.count({
+        where: { requestId: id },
+      }),
+    ).toBe(0);
+  });
+
+  it('enforces holder and verifier roles on client-signing endpoints', async () => {
+    const id = await newRequest();
+    const prepared = await prepare(id);
+
+    await request(server)
+      .post(`/api/v1/verification-requests/${id}/prepare-client`)
+      .set('Authorization', `Bearer ${verifierToken}`)
+      .send({ credentialId, approvedClaims: claims })
+      .expect(403);
+
+    await request(server)
+      .post(`/api/v1/verification-requests/${id}/approve-client`)
+      .set('Authorization', `Bearer ${verifierToken}`)
+      .send(approvalBody(prepared))
+      .expect(403);
+
+    await request(server)
+      .post(
+        `/api/v1/verification/presentations/${prepared.presentationId}/verify`,
+      )
+      .set('Authorization', `Bearer ${holderToken}`)
+      .expect(403);
+
+    const stored = await prisma.verificationRequest.findUnique({
+      where: { id },
+    });
+
+    expect(stored?.status).toBe(VerificationRequestStatus.PENDING);
+  });
 });
