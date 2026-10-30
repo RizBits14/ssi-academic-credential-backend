@@ -29,8 +29,6 @@ export class HolderDidEnrollmentService {
   async complete(holderId: string, challengeId: string, signature: string) {
     await this.assertEligibleHolder(holderId);
 
-    // The proof service checks the authenticated holder, signature, expiry,
-    // and single-use Redis challenge before returning the public key.
     const { publicKeyPem } = await this.keyProof.verifyAndConsume({
       holderId,
       challengeId,
@@ -98,8 +96,6 @@ export class HolderDidEnrollmentService {
         return record;
       });
     } catch (error: unknown) {
-      // Unique(ownerType, ownerId) prevents concurrent enrollments from
-      // creating multiple DIDs for one holder.
       if (
         typeof error === 'object' &&
         error !== null &&

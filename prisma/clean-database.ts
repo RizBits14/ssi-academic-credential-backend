@@ -8,8 +8,6 @@ import { PrismaClient } from '../src/generated/prisma/client';
 async function main(): Promise<void> {
   const connectionString = process.env.DATABASE_URL;
 
-  // Also check inside the destructive script itself. This protects direct
-  // execution, which would bypass the npm script's preliminary guard.
   assertSafeDatabaseMaintenance({
     command: 'db:clean',
     nodeEnvironment: process.env.NODE_ENV,

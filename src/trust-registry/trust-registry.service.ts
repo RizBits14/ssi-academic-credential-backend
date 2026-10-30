@@ -172,7 +172,6 @@ export class TrustRegistryService {
     }
 
     return this.prisma.$transaction(async (transaction) => {
-      // Only one concurrent suspension can change TRUSTED to SUSPENDED.
       const updateResult = await transaction.trustedIssuer.updateMany({
         where: {
           id,

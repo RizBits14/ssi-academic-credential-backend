@@ -504,7 +504,6 @@ export class VerificationRequestsService {
       throw new NotFoundException('Active holder DID not found');
     }
 
-    // Client-only enrollment must never silently fall back to server custody.
     const clientOwnedKey = await this.prisma.didKey.findFirst({
       where: {
         didId: didRecord.id,
@@ -594,14 +593,10 @@ export class VerificationRequestsService {
       proofOptions,
       signingPayloadBase64url: hashData.toString('base64url'),
       expiresAt: request.expiresAt.toISOString(),
-      // Internal values used only to commit atomically; not returned to clients.
-      // They are constructed from the stored request and wallet credential.
     };
   }
 
   async approveClient(input: ApproveClientPresentationInput) {
-    // Rebuild rather than trust a submitted unsigned presentation, claims,
-    // challenge, domain, or DID verification method.
     const prepared = await this.prepareClientApproval(input);
 
     const signature = this.decodeClientProofValue(input.proofValue);

@@ -76,7 +76,6 @@ export class CredentialStatusService {
       );
     }
 
-    // A suspended credential must not be reactivated after it expires.
     if (credential.expiresAt && credential.expiresAt.getTime() <= Date.now()) {
       throw new ConflictException(
         'An expired credential cannot be reactivated',

@@ -55,7 +55,6 @@ export class HolderKeyProofService {
       .update(publicKeyPem, 'utf8')
       .digest('hex');
 
-    // The client signs these exact UTF-8 bytes using its private key.
     const message = JSON.stringify({
       type: 'ssi-academic-credential-holder-key-proof-v1',
       purpose: 'holder-key-enrollment',
@@ -104,7 +103,6 @@ export class HolderKeyProofService {
 
     const key = this.challengeKey(input.challengeId);
 
-    // Check the authenticated holder before consuming the challenge.
     const current = await this.redis.getJson<HolderKeyChallengeSession>(key);
 
     if (!current) {
@@ -119,7 +117,6 @@ export class HolderKeyProofService {
       );
     }
 
-    // Redis GETDEL ensures only one concurrent request can succeed.
     const session =
       await this.redis.consumeJson<HolderKeyChallengeSession>(key);
 

@@ -54,9 +54,6 @@ export class RefreshTokenService {
     const now = new Date();
 
     return this.prisma.$transaction(async (transaction) => {
-      // This no-op update intentionally takes a row-level write lock on the
-      // active family. Family revocation uses the same row first, preventing
-      // a child token from being inserted after the family has been revoked.
       const activeFamily = await transaction.refreshTokenFamily.updateMany({
         where: {
           id: familyId,

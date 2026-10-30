@@ -669,8 +669,6 @@ export class DidService {
           key.algorithm,
         ),
 
-        // Keep PEM internally until SignatureService is migrated to
-        // verify directly from Multikey/publicKeyMultibase.
         publicKey: key.publicKey,
       },
       status: didRecord.status,
