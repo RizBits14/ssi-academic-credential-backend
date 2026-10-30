@@ -2,10 +2,22 @@ import 'dotenv/config';
 
 import { PrismaPg } from '@prisma/adapter-pg';
 
+import { assertSafeDatabaseMaintenance } from '../src/common/utils/database-maintenance-safety.util';
 import { PrismaClient } from '../src/generated/prisma/client';
 
 async function main(): Promise<void> {
   const connectionString = process.env.DATABASE_URL;
+
+  // Also check inside the destructive script itself. This protects direct
+  // execution, which would bypass the npm script's preliminary guard.
+  assertSafeDatabaseMaintenance({
+    command: 'db:clean',
+    nodeEnvironment: process.env.NODE_ENV,
+    vercelEnvironment: process.env.VERCEL_ENV,
+    databaseUrl: connectionString,
+    allowRemoteClean: process.env.DB_CLEAN_ALLOW_REMOTE,
+    confirmTarget: process.env.DB_CLEAN_CONFIRM_TARGET,
+  });
 
   if (!connectionString) {
     throw new Error('DATABASE_URL is not defined in the environment.');
