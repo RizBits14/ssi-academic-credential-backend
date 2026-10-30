@@ -89,9 +89,9 @@ interface PublicDidKeyRecord {
 
 interface SigningDidKeyRecord {
   publicKey: string;
-  encryptedPrivateKey: string;
-  iv: string;
-  authTag: string;
+  encryptedPrivateKey: string | null;
+  iv: string | null;
+  authTag: string | null;
   encryptionKeyId: string | null;
   algorithm: string;
   version: number;
@@ -289,6 +289,8 @@ export class DidService {
 
     this.assertKeyCanSign(key, 'Organization', algorithm);
 
+    this.assertServerManagedKey(key, 'Organization');
+
     const privateKey = this.encryptionService.decryptForDid({
       ciphertext: key.encryptedPrivateKey,
       iv: key.iv,
@@ -324,6 +326,8 @@ export class DidService {
     }
 
     this.assertKeyCanSign(key, 'Holder', 'Ed25519');
+
+    this.assertServerManagedKey(key, 'Holder');
 
     const privateKey = this.encryptionService.decryptForDid({
       ciphertext: key.encryptedPrivateKey,
@@ -365,6 +369,8 @@ export class DidService {
       userId,
       'Only holders can rotate user DID keys',
     );
+
+    await this.requireServerManagedHolderKey(didRecord);
 
     return this.rotateKey(
       didRecord,
@@ -442,6 +448,8 @@ export class DidService {
       userId,
       'Only holders can recover user DIDs',
     );
+
+    await this.requireServerManagedHolderKey(didRecord);
 
     return this.recoverCurrentKey(
       didRecord,
@@ -591,6 +599,38 @@ export class DidService {
     }
 
     throw new ConflictException('DID algorithm is not supported');
+  }
+
+  private assertServerManagedKey(
+    key: SigningDidKeyRecord,
+    owner: 'Holder' | 'Organization',
+  ): asserts key is SigningDidKeyRecord & {
+    encryptedPrivateKey: string;
+    iv: string;
+    authTag: string;
+  } {
+    if (!key.encryptedPrivateKey || !key.iv || !key.authTag) {
+      throw new ConflictException(
+        owner === 'Holder'
+          ? 'Holder DID is client-controlled; the private key must be used on the holder device'
+          : 'Organization DID signing key is not managed by the server',
+      );
+    }
+  }
+
+  private async requireServerManagedHolderKey(
+    didRecord: PublicDidRecord,
+  ): Promise<void> {
+    const key = await this.findSigningDidKeyByVersion(
+      didRecord.id,
+      didRecord.currentKeyVersion,
+    );
+
+    if (!key || key.status !== DidKeyStatus.ACTIVE) {
+      throw new ConflictException('Current holder DID key is not active');
+    }
+
+    this.assertServerManagedKey(key, 'Holder');
   }
 
   private assertKeyCanSign(
