@@ -20,7 +20,11 @@ import {
   ApiProtectedEndpoint,
   ApiPublicEndpoint,
 } from '../common/swagger/api-endpoint.decorator';
-import { OrganizationType, UserRole } from '../generated/prisma/enums';
+import {
+  DidOwnerType,
+  OrganizationType,
+  UserRole,
+} from '../generated/prisma/enums';
 import { OrganizationsService } from '../organizations/organizations.service';
 import { DidService } from './did.service';
 import { ChangeDidKeyDto } from './dto/change-did-key.dto';
@@ -34,6 +38,31 @@ export class DidController {
     private readonly didService: DidService,
     private readonly organizationsService: OrganizationsService,
   ) {}
+
+  @ApiProtectedEndpoint('Get the authenticated holder DID')
+  @Get('me')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.HOLDER)
+  async getMyDid(@Req() request: AuthenticatedRequest) {
+    const did = await this.didService.findPublicByOwner(
+      DidOwnerType.USER,
+      request.user.sub,
+    );
+
+    if (!did) {
+      throw new NotFoundException('Holder DID not found');
+    }
+
+    return did;
+  }
+
+  @ApiProtectedEndpoint('Enroll the authenticated holder DID', 201)
+  @Post('me/enroll')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.HOLDER)
+  enrollHolder(@Req() request: AuthenticatedRequest) {
+    return this.didService.createForUser(request.user.sub);
+  }
 
   @ApiPublicEndpoint('Resolve a DID document')
   @Get(':did')

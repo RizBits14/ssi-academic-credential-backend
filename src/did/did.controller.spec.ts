@@ -1,8 +1,12 @@
-import { NotFoundException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 import type { AuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
-import { OrganizationType, UserRole } from '../generated/prisma/enums';
+import {
+  DidOwnerType,
+  OrganizationType,
+  UserRole,
+} from '../generated/prisma/enums';
 import { OrganizationsService } from '../organizations/organizations.service';
 import { DidController } from './did.controller';
 import { DidService } from './did.service';
@@ -10,6 +14,8 @@ import { DidService } from './did.service';
 describe('DidController', () => {
   const mockDidService = {
     resolveDid: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+    findPublicByOwner: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
+    createForUser: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
     rotateForOrganization: jest.fn<(...args: unknown[]) => Promise<unknown>>(),
     revokeHistoricalKeyForOrganization:
       jest.fn<(...args: unknown[]) => Promise<unknown>>(),
@@ -45,6 +51,68 @@ describe('DidController', () => {
       },
     } as unknown as AuthenticatedRequest;
   }
+
+  it('should enroll a DID for the currently authenticated holder', async () => {
+    const created = {
+      id: 'did-record-id',
+      did: 'did:mock:holder:123',
+      ownerType: DidOwnerType.USER,
+      ownerId: 'holder-id',
+      currentKeyVersion: 1,
+      status: 'ACTIVE',
+    };
+
+    mockDidService.createForUser.mockResolvedValue(created);
+
+    const result = await controller.enrollHolder(
+      requestFor('holder-id', UserRole.HOLDER),
+    );
+
+    expect(mockDidService.createForUser).toHaveBeenCalledTimes(1);
+    expect(mockDidService.createForUser).toHaveBeenCalledWith('holder-id');
+    expect(result).toEqual(created);
+  });
+
+  it('should return only the authenticated holder DID', async () => {
+    const record = {
+      id: 'did-record-id',
+      did: 'did:mock:holder:123',
+      ownerType: DidOwnerType.USER,
+      ownerId: 'holder-id',
+      currentKeyVersion: 1,
+      status: 'ACTIVE',
+    };
+
+    mockDidService.findPublicByOwner.mockResolvedValue(record);
+
+    const result = await controller.getMyDid(
+      requestFor('holder-id', UserRole.HOLDER),
+    );
+
+    expect(mockDidService.findPublicByOwner).toHaveBeenCalledWith(
+      DidOwnerType.USER,
+      'holder-id',
+    );
+    expect(result).toEqual(record);
+  });
+
+  it('should reject a holder DID lookup when onboarding is incomplete', async () => {
+    mockDidService.findPublicByOwner.mockResolvedValue(null);
+
+    await expect(
+      controller.getMyDid(requestFor('new-holder-id', UserRole.HOLDER)),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('should preserve the duplicate-enrollment conflict from the DID service', async () => {
+    mockDidService.createForUser.mockRejectedValue(
+      new ConflictException('User already has a DID'),
+    );
+
+    await expect(
+      controller.enrollHolder(requestFor('holder-id', UserRole.HOLDER)),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
 
   it('should expose a standards-facing DID document without the internal PEM key', async () => {
     const did = 'did:mock:holder:123';
