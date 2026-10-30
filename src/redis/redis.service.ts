@@ -28,6 +28,22 @@ export class RedisService implements OnModuleDestroy {
     return JSON.parse(value) as T;
   }
 
+  /**
+   * Atomically reads and deletes a JSON value.
+   *
+   * Redis GETDEL requires Redis 6.2 or newer.
+   * This prevents concurrent requests from reusing one challenge.
+   */
+  async consumeJson<T>(key: string): Promise<T | null> {
+    const value = await this.client.getdel(key);
+
+    if (!value) {
+      return null;
+    }
+
+    return JSON.parse(value) as T;
+  }
+
   async delete(key: string): Promise<void> {
     await this.client.del(key);
   }

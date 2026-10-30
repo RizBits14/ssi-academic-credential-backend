@@ -4,11 +4,12 @@ import { AuthModule } from '../auth/auth.module';
 import { OrganizationsModule } from '../organizations/organizations.module';
 import { DidController } from './did.controller';
 import { DidService } from './did.service';
+import { HolderKeyProofService } from './holder-key-proof.service';
 
 @Module({
   imports: [AuthModule, OrganizationsModule],
   controllers: [DidController],
-  providers: [DidService],
-  exports: [DidService],
+  providers: [DidService, HolderKeyProofService],
+  exports: [DidService, HolderKeyProofService],
 })
 export class DidModule {}
