@@ -28,23 +28,36 @@ const prisma = new PrismaClient({
 });
 
 async function main() {
-  const passwordHash = await argon2.hash(seedPassword, {
-    type: argon2.argon2id,
-  });
+  const hashPassword = () =>
+    argon2.hash(seedPassword, {
+      type: argon2.argon2id,
+    });
+
+  const [
+    systemAdminPasswordHash,
+    issuerAdminPasswordHash,
+    verifierAdminPasswordHash,
+    holderPasswordHash,
+  ] = await Promise.all([
+    hashPassword(),
+    hashPassword(),
+    hashPassword(),
+    hashPassword(),
+  ]);
 
   const systemAdmin = await prisma.user.upsert({
     where: {
-      email: 'zara.whitmore@credentialbridge.example',
+      email: 'zara.whitmoren@credentialbridge.example',
     },
     update: {
       name: 'Zara Whitmore',
-      passwordHash,
+      passwordHash: systemAdminPasswordHash,
       role: UserRole.SYSTEM_ADMIN,
     },
     create: {
       name: 'Zara Whitmore',
       email: 'zara.whitmoren@credentialbridge.example',
-      passwordHash,
+      passwordHash: systemAdminPasswordHash,
       role: UserRole.SYSTEM_ADMIN,
     },
   });
@@ -74,13 +87,13 @@ async function main() {
     },
     update: {
       name: 'Ethan Blake',
-      passwordHash,
+      passwordHash: issuerAdminPasswordHash,
       role: UserRole.ISSUER_ADMIN,
     },
     create: {
       name: 'Ethan Blake',
       email: 'ethan.blake@northbridge.edu.example',
-      passwordHash,
+      passwordHash: issuerAdminPasswordHash,
       role: UserRole.ISSUER_ADMIN,
     },
   });
@@ -124,13 +137,13 @@ async function main() {
     },
     update: {
       name: 'Amelia Rose',
-      passwordHash,
+      passwordHash: verifierAdminPasswordHash,
       role: UserRole.VERIFIER_ADMIN,
     },
     create: {
       name: 'Amelia Rose',
       email: 'amelia.rose@meridianbank.example',
-      passwordHash,
+      passwordHash: verifierAdminPasswordHash,
       role: UserRole.VERIFIER_ADMIN,
     },
   });
@@ -155,13 +168,13 @@ async function main() {
     },
     update: {
       name: 'Lucas Kennete',
-      passwordHash,
+      passwordHash: holderPasswordHash,
       role: UserRole.HOLDER,
     },
     create: {
       name: 'Lucas Kennete',
       email: 'lucas.kennete@mail.example',
-      passwordHash,
+      passwordHash: holderPasswordHash,
       role: UserRole.HOLDER,
     },
   });
