@@ -9,6 +9,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 
 import { Roles } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -30,6 +31,8 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @ApiPublicEndpoint('Register a new credential holder', 201)
+  @Throttle({ default: { limit: 6, ttl: 60_000 } })
+  @Post('register')
   @Post('register')
   register(@Body() dto: RegisterDto) {
     return this.authService.registerHolder(dto);
@@ -37,6 +40,8 @@ export class AuthController {
 
   @ApiPublicEndpoint('Authenticate user and issue tokens')
   @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @Post('login')
   @Post('login')
   login(@Body() dto: LoginDto) {
     return this.authService.login(dto);
@@ -44,6 +49,8 @@ export class AuthController {
 
   @ApiPublicEndpoint('Rotate refresh token and issue new tokens')
   @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  @Post('refresh')
   @Post('refresh')
   refresh(@Body() dto: RefreshTokenDto) {
     return this.authService.refresh(dto);

@@ -2319,6 +2319,16 @@ describe('SSI Academic Credential API (e2e)', () => {
         throw new Error('Temporary DID key fixture is unavailable');
       }
 
+      if (
+        initialDidKey.encryptedPrivateKey === null ||
+        initialDidKey.iv === null ||
+        initialDidKey.authTag === null
+      ) {
+        throw new Error(
+          'Temporary DID key must contain encrypted private-key material',
+        );
+      }
+
       expect(initialDidKey.encryptionKeyId).toBe(didActiveKeyId);
 
       const privateKeyPlaintext = encryptionService.decryptForDid({
@@ -2901,5 +2911,57 @@ describe('SSI Academic Credential API (e2e)', () => {
     });
 
     expect(requestRecord?.status).toBe(VerificationRequestStatus.VERIFIED);
+  });
+
+  it('rate limits public authentication endpoints', async () => {
+    const scenarios = [
+      {
+        path: '/api/v1/auth/register',
+        payload: {
+          name: '',
+          email: 'invalid',
+          password: 'invalid',
+        },
+        maxAttempts: 8,
+        rejectedStatus: 400,
+      },
+      {
+        path: '/api/v1/auth/login',
+        payload: {
+          email: 'unknown-rate-limit@example.com',
+          password: 'InvalidPassword123!',
+        },
+        maxAttempts: 12,
+        rejectedStatus: 401,
+      },
+      {
+        path: '/api/v1/auth/refresh',
+        payload: {
+          refreshToken: 'invalid-refresh-token',
+        },
+        maxAttempts: 22,
+        rejectedStatus: 401,
+      },
+    ];
+
+    for (const scenario of scenarios) {
+      let rateLimited = false;
+
+      for (let attempt = 0; attempt < scenario.maxAttempts; attempt += 1) {
+        const response = await request(httpServer)
+          .post(scenario.path)
+          .send(scenario.payload);
+
+        if (response.status === 429) {
+          expect(getError(response).error.code).toBe('RATE_LIMITED');
+          rateLimited = true;
+          break;
+        }
+
+        expect(response.status).toBe(scenario.rejectedStatus);
+      }
+
+      expect(rateLimited).toBe(true);
+    }
   });
 });
