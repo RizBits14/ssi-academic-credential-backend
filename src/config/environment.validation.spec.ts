@@ -180,4 +180,53 @@ describe('validateEnvironment', () => {
       ),
     ).toThrow('SWAGGER_ENABLED must be false in production');
   });
+
+  it('accepts a secure direct Prisma Postgres connection', () => {
+    const directUrl =
+      'postgresql://user:password@db.prisma.io:5432/postgres?sslmode=verify-full';
+
+    const result = validateEnvironment(
+      validConfig({
+        DIRECT_URL: directUrl,
+      }),
+    );
+
+    expect(result.DIRECT_URL).toBe(directUrl);
+  });
+
+  it('rejects an insecure direct PostgreSQL connection', () => {
+    expect(() =>
+      validateEnvironment(
+        validConfig({
+          DIRECT_URL:
+            'postgresql://user:password@db.example.com:5432/postgres?sslmode=require',
+        }),
+      ),
+    ).toThrow(
+      'DIRECT_URL for a remote PostgreSQL server must use sslmode=verify-full',
+    );
+  });
+
+  it('rejects a direct Prisma Postgres connection with SSL disabled', () => {
+    expect(() =>
+      validateEnvironment(
+        validConfig({
+          DIRECT_URL:
+            'postgresql://user:password@db.prisma.io:5432/postgres?sslmode=disable',
+        }),
+      ),
+    ).toThrow(
+      'DIRECT_URL for Prisma Postgres must use sslmode=require or sslmode=verify-full',
+    );
+  });
+
+  it('rejects malformed direct database URLs', () => {
+    expect(() =>
+      validateEnvironment(
+        validConfig({
+          DIRECT_URL: 'not-a-postgresql-url',
+        }),
+      ),
+    ).toThrow('DIRECT_URL must be a valid PostgreSQL URL');
+  });
 });

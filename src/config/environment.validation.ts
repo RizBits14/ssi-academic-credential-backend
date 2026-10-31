@@ -99,7 +99,7 @@ function isPrismaPostgresHostname(hostname: string): boolean {
   return normalized === 'pooled.db.prisma.io' || normalized === 'db.prisma.io';
 }
 
-function validatePostgresUrl(value: string, name: string): void {
+export function validatePostgresUrl(value: string, name: string): void {
   let parsed: URL;
 
   try {
@@ -270,6 +270,13 @@ export function validateEnvironment(
   const databaseUrl = requireString(config, 'DATABASE_URL');
   validatePostgresUrl(databaseUrl, 'DATABASE_URL');
   validated.DATABASE_URL = databaseUrl;
+
+  const directUrl = optionalString(config, 'DIRECT_URL');
+
+  if (directUrl) {
+    validatePostgresUrl(directUrl, 'DIRECT_URL');
+    validated.DIRECT_URL = directUrl;
+  }
 
   const redisUrl = requireString(config, 'REDIS_URL');
   validateRedisUrl(redisUrl, nodeEnv);
