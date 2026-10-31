@@ -32,17 +32,19 @@ describe('OrganizationsService', () => {
   it('should find an organization by slug', async () => {
     const organization = {
       id: 'organization-id',
-      slug: 'example-university',
+      slug: 'northbridge-university',
       name: 'Example University',
     };
 
     mockPrisma.organization.findUnique.mockResolvedValue(organization);
 
-    const result = await organizationsService.findBySlug('example-university');
+    const result = await organizationsService.findBySlug(
+      'northbridge-university',
+    );
 
     expect(mockPrisma.organization.findUnique).toHaveBeenCalledWith({
       where: {
-        slug: 'example-university',
+        slug: 'northbridge-university',
       },
     });
 

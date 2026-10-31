@@ -26,19 +26,19 @@ async function main() {
   try {
     const university = await prisma.organization.findUnique({
       where: {
-        slug: 'example-university',
+        slug: 'northbridge-university',
       },
     });
 
     const bank = await prisma.organization.findUnique({
       where: {
-        slug: 'example-bank',
+        slug: 'meridian-commercial-bank',
       },
     });
 
     const holder = await prisma.user.findUnique({
       where: {
-        email: 'applicant@example.com',
+        email: 'lucas.kennete@mail.example',
       },
     });
 

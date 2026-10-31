@@ -34,16 +34,16 @@ async function main() {
 
   const systemAdmin = await prisma.user.upsert({
     where: {
-      email: 'system.admin@example.com',
+      email: 'zara.whitmore@credentialbridge.example',
     },
     update: {
-      name: 'System Administrator',
+      name: 'Zara Whitmore',
       passwordHash,
       role: UserRole.SYSTEM_ADMIN,
     },
     create: {
-      name: 'System Administrator',
-      email: 'system.admin@example.com',
+      name: 'Zara Whitmore',
+      email: 'zara.whitmoren@credentialbridge.example',
       passwordHash,
       role: UserRole.SYSTEM_ADMIN,
     },
@@ -51,33 +51,35 @@ async function main() {
 
   const university = await prisma.organization.upsert({
     where: {
-      slug: 'example-university',
+      slug: 'northbridge-university',
     },
     update: {
-      name: 'Example University',
+      name: 'Northbridge University',
       type: OrganizationType.UNIVERSITY,
-      email: 'contact@example-university.edu',
+      email: 'registrar@northbridge.edu.example',
+      website: 'https://northbridge.edu.example',
     },
     create: {
-      name: 'Example University',
-      slug: 'example-university',
+      name: 'Northbridge University',
+      slug: 'northbridge-university',
       type: OrganizationType.UNIVERSITY,
-      email: 'contact@example-university.edu',
+      email: 'registrar@northbridge.edu.example',
+      website: 'https://northbridge.edu.example',
     },
   });
 
   const issuerAdmin = await prisma.user.upsert({
     where: {
-      email: 'issuer.admin@example.com',
+      email: 'ethan.blake@northbridge.edu.example',
     },
     update: {
-      name: 'University Administrator',
+      name: 'Ethan Blake',
       passwordHash,
       role: UserRole.ISSUER_ADMIN,
     },
     create: {
-      name: 'University Administrator',
-      email: 'issuer.admin@example.com',
+      name: 'Ethan Blake',
+      email: 'ethan.blake@northbridge.edu.example',
       passwordHash,
       role: UserRole.ISSUER_ADMIN,
     },
@@ -99,33 +101,35 @@ async function main() {
 
   const bank = await prisma.organization.upsert({
     where: {
-      slug: 'example-bank',
+      slug: 'meridian-commercial-bank',
     },
     update: {
-      name: 'Example Bank',
+      name: 'Meridian Commercial Bank PLC',
       type: OrganizationType.BANK,
-      email: 'contact@example-bank.com',
+      email: 'careers@meridianbank.example',
+      website: 'https://meridianbank.example',
     },
     create: {
-      name: 'Example Bank',
-      slug: 'example-bank',
+      name: 'Meridian Commercial Bank PLC',
+      slug: 'meridian-commercial-bank',
       type: OrganizationType.BANK,
-      email: 'contact@example-bank.com',
+      email: 'careers@meridianbank.example',
+      website: 'https://meridianbank.example',
     },
   });
 
   const verifierAdmin = await prisma.user.upsert({
     where: {
-      email: 'verifier.admin@example.com',
+      email: 'amelia.rose@meridianbank.example',
     },
     update: {
-      name: 'Bank HR Administrator',
+      name: 'Amelia Rose',
       passwordHash,
       role: UserRole.VERIFIER_ADMIN,
     },
     create: {
-      name: 'Bank HR Administrator',
-      email: 'verifier.admin@example.com',
+      name: 'Amelia Rose',
+      email: 'amelia.rose@meridianbank.example',
       passwordHash,
       role: UserRole.VERIFIER_ADMIN,
     },
@@ -147,16 +151,16 @@ async function main() {
 
   const holder = await prisma.user.upsert({
     where: {
-      email: 'applicant@example.com',
+      email: 'lucas.kennete@mail.example',
     },
     update: {
-      name: 'Sample Applicant',
+      name: 'Lucas Kennete',
       passwordHash,
       role: UserRole.HOLDER,
     },
     create: {
-      name: 'Sample Applicant',
-      email: 'applicant@example.com',
+      name: 'Lucas Kennete',
+      email: 'lucas.kennete@mail.example',
       passwordHash,
       role: UserRole.HOLDER,
     },

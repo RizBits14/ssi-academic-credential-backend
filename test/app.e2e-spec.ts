@@ -433,27 +433,27 @@ describe('SSI Academic Credential API (e2e)', () => {
       await Promise.all([
         prisma.user.findUnique({
           where: {
-            email: 'system.admin@example.com',
+            email: 'zara.whitmoren@credentialbridge.example',
           },
         }),
         prisma.user.findUnique({
           where: {
-            email: 'issuer.admin@example.com',
+            email: 'ethan.blake@northbridge.edu.example',
           },
         }),
         prisma.user.findUnique({
           where: {
-            email: 'verifier.admin@example.com',
+            email: 'amelia.rose@meridianbank.example',
           },
         }),
         prisma.user.findUnique({
           where: {
-            email: 'applicant@example.com',
+            email: 'lucas.kennete@mail.example',
           },
         }),
         prisma.organization.findUnique({
           where: {
-            slug: 'example-university',
+            slug: 'northbridge-university',
           },
         }),
       ]);
@@ -564,9 +564,9 @@ describe('SSI Academic Credential API (e2e)', () => {
       };
     }
 
-    issuerAuth = await login('issuer.admin@example.com');
-    verifierAuth = await login('verifier.admin@example.com');
-    holderAuth = await login('applicant@example.com');
+    issuerAuth = await login('ethan.blake@northbridge.edu.example');
+    verifierAuth = await login('amelia.rose@meridianbank.example');
+    holderAuth = await login('lucas.kennete@mail.example');
 
     const academicRecordResponse = await request(httpServer)
       .post('/api/v1/academic-records')
@@ -925,7 +925,7 @@ describe('SSI Academic Credential API (e2e)', () => {
     const invalidLoginResponse = await request(httpServer)
       .post('/api/v1/auth/login')
       .send({
-        email: 'issuer.admin@example.com',
+        email: 'ethan.blake@northbridge.edu.example',
         password: 'definitely-wrong-password',
       })
       .expect(401);
@@ -936,7 +936,7 @@ describe('SSI Academic Credential API (e2e)', () => {
   });
 
   it('revokes the refresh-token family after concurrent reuse of the same parent token', async () => {
-    const isolatedSession = await login('applicant@example.com');
+    const isolatedSession = await login('lucas.kennete@mail.example');
 
     const parentTokenHash = createHash('sha256')
       .update(isolatedSession.refreshToken)

@@ -131,7 +131,7 @@ describe('Client-owned holder DID enrollment (e2e)', () => {
     const issuerLogin = await request(server)
       .post('/api/v1/auth/login')
       .send({
-        email: 'issuer.admin@example.com',
+        email: 'ethan.blake@northbridge.edu.example',
         password: seedPassword,
       })
       .expect(200);

@@ -176,15 +176,15 @@ describe('Client-signed presentation (e2e)', () => {
     }
 
     const university = await prisma.organization.findUnique({
-      where: { slug: 'example-university' },
+      where: { slug: 'northbridge-university' },
     });
 
     const bank = await prisma.organization.findUnique({
-      where: { slug: 'example-bank' },
+      where: { slug: 'meridian-commercial-bank' },
     });
 
     const administrator = await prisma.user.findUnique({
-      where: { email: 'system.admin@example.com' },
+      where: { email: 'zara.whitmoren@credentialbridge.example' },
     });
 
     if (!university || !bank || !administrator) {
@@ -247,11 +247,17 @@ describe('Client-signed presentation (e2e)', () => {
       createdTrustId = created.id;
     }
 
-    issuerToken = await login('issuer.admin@example.com', seedPassword);
+    issuerToken = await login(
+      'ethan.blake@northbridge.edu.example',
+      seedPassword,
+    );
 
-    verifierToken = await login('verifier.admin@example.com', seedPassword);
+    verifierToken = await login(
+      'amelia.rose@meridianbank.example',
+      seedPassword,
+    );
 
-    otherHolderToken = await login('applicant@example.com', seedPassword);
+    otherHolderToken = await login('lucas.kennete@mail.example', seedPassword);
 
     const registered = await request(server)
       .post('/api/v1/auth/register')
