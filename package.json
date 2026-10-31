@@ -18,6 +18,7 @@
     "start:prod": "node dist/main",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --ignore-pattern \"src/generated/**\" --fix",
     "lint:check": "eslint \"{src,apps,libs,test}/**/*.ts\" --ignore-pattern \"src/generated/**\"",
+    "typecheck": "tsc --noEmit --project tsconfig.json",
     "test": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js",
     "test:watch": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --watch",
     "test:cov": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --coverage",
@@ -28,7 +29,7 @@
     "db:seed": "tsx prisma/ensure-non-production.ts db:seed && tsx prisma/seed.ts",
     "setup:dids": "tsx prisma/ensure-non-production.ts setup:dids && tsx prisma/create-initial-dids.ts",
     "db:setup": "tsx prisma/ensure-non-production.ts db:setup && npm run prisma:generate && npm run db:migrate && npm run db:seed && npm run setup:dids",
-    "verify": "npm run format:check && npm run build && npm run lint:check && npm test && npm run test:e2e",
+    "verify": "npm run format:check && npm run typecheck && npm run build && npm run lint:check && npm test && npm run test:e2e",
     "db:clean": "tsx prisma/ensure-non-production.ts db:clean && tsx prisma/clean-database.ts",
     "db:clean:seed": "tsx prisma/ensure-non-production.ts db:clean:seed && npm run db:clean && npm run db:seed && npm run setup:dids"
   },
