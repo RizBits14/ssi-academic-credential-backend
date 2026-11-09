@@ -32,7 +32,7 @@ Thumbs.db
 
 # Nest / TypeScript
 *.tsbuildinfo
-/src/generated/prisma
+/apps/api/src/generated/prisma/
 .agents
 .claude
 .windsurf

@@ -1,119 +1,23 @@
 {
-  "name": "ssi-academic-credential-backend",
-  "version": "0.0.1",
-  "description": "NestJS backend for SSI-style academic credential issuance, holder-controlled disclosure, and bank recruitment verification",
-  "author": "",
-  "private": true,
-  "license": "UNLICENSED",
-  "engines": {
-    "node": "24.x"
-  },
-  "scripts": {
-    "build": "prisma generate && nest build",
-    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\" \"prisma/**/*.ts\" \"prisma.config.ts\"",
-    "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\" \"prisma/**/*.ts\" \"prisma.config.ts\"",
-    "start": "nest start",
-    "start:dev": "nest start --watch",
-    "start:debug": "nest start --debug --watch",
-    "start:prod": "node dist/main",
-    "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --ignore-pattern \"src/generated/**\" --fix",
-    "lint:check": "eslint \"{src,apps,libs,test}/**/*.ts\" --ignore-pattern \"src/generated/**\"",
-    "typecheck": "tsc --noEmit --project tsconfig.json",
-    "test": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js",
-    "test:watch": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --watch",
-    "test:cov": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --coverage",
-    "test:debug": "node --experimental-vm-modules --inspect-brk ./node_modules/jest/bin/jest.js --runInBand",
-    "test:e2e": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --config ./test/jest-e2e.json",
-    "prisma:generate": "prisma generate",
-    "db:migrate": "prisma migrate deploy",
-    "db:seed": "tsx prisma/ensure-non-production.ts db:seed && tsx prisma/seed.ts",
-    "setup:dids": "tsx prisma/ensure-non-production.ts setup:dids && tsx prisma/create-initial-dids.ts",
-    "db:setup": "tsx prisma/ensure-non-production.ts db:setup && npm run prisma:generate && npm run db:migrate && npm run db:seed && npm run setup:dids",
-    "verify": "npm run format:check && npm run typecheck && npm run build && npm run lint:check && npm test && npm run test:e2e",
-    "db:clean": "tsx prisma/ensure-non-production.ts db:clean && tsx prisma/clean-database.ts",
-    "db:clean:seed": "tsx prisma/ensure-non-production.ts db:clean:seed && npm run db:clean && npm run db:seed && npm run setup:dids"
-  },
-  "dependencies": {
-    "@digitalbazaar/credentials-context": "3.2.0",
-    "@digitalbazaar/data-integrity": "2.5.0",
-    "@digitalbazaar/data-integrity-context": "2.0.1",
-    "@digitalbazaar/ecdsa-multikey": "1.8.0",
-    "@digitalbazaar/ecdsa-sd-2023-cryptosuite": "3.4.1",
-    "@nestjs/common": "^11.2.8",
-    "@nestjs/config": "^4.0.4",
-    "@nestjs/core": "^11.2.8",
-    "@nestjs/jwt": "^11.0.2",
-    "@nestjs/platform-express": "^11.2.8",
-    "@nestjs/swagger": "^11.4.7",
-    "@nestjs/throttler": "^6.5.0",
-    "@prisma/adapter-pg": "^7.10.0",
-    "@prisma/client": "^7.10.1",
-    "argon2": "^0.45.1",
-    "canonicalize": "^5.1.0",
-    "class-transformer": "^0.5.1",
-    "class-validator": "^0.15.1",
-    "dotenv": "^17.4.2",
-    "helmet": "^8.3.0",
-    "ioredis": "^6.0.0",
-    "jsonld-signatures": "11.6.0",
-    "nestjs-pino": "^5.2.0",
-    "pg": "^8.23.0",
-    "pino": "^10.3.1",
-    "pino-http": "^11.0.0",
-    "reflect-metadata": "^0.2.2",
-    "rxjs": "^7.8.1"
-  },
-  "devDependencies": {
-    "@eslint/eslintrc": "^3.2.0",
-    "@eslint/js": "^9.18.0",
-    "@nestjs/cli": "^11.0.0",
-    "@nestjs/schematics": "^11.0.0",
-    "@nestjs/testing": "^11.2.8",
-    "@types/express": "^5.0.0",
-    "@types/jest": "^30.0.0",
-    "@types/node": "^24.0.0",
-    "@types/pg": "^8.23.1",
-    "@types/supertest": "^7.0.0",
-    "eslint": "^9.18.0",
-    "eslint-config-prettier": "^10.0.1",
-    "eslint-plugin-prettier": "^5.2.2",
-    "globals": "^17.0.0",
-    "jest": "^30.0.0",
-    "prettier": "^3.4.2",
-    "prisma": "^7.10.1",
-    "source-map-support": "^0.5.21",
-    "supertest": "^7.0.0",
-    "ts-jest": "^29.2.5",
-    "ts-loader": "^9.5.2",
-    "ts-node": "^10.9.2",
-    "tsconfig-paths": "^4.2.0",
-    "tsx": "^4.23.13",
-    "typescript": "^5.7.3",
-    "typescript-eslint": "^8.20.0"
-  },
-  "overrides": {
-    "@nestjs/platform-express": {
-      "multer": "2.5.0"
+    "name": "ssi-academic-credential-platform",
+    "version": "1.0.0",
+    "private": true,
+    "description": "SSI-based academic credential issuance and verification platform",
+    "workspaces": [
+        "apps/*"
+    ],
+    "scripts": {
+        "dev:api": "npm run start:dev --workspace=apps/api",
+        "build:api": "npm run build --workspace=apps/api",
+        "test:api": "npm run test --workspace=apps/api",
+        "verify:api": "npm run verify --workspace=apps/api"
     },
-    "@nestjs/swagger": {
-      "js-yaml": "5.4.1"
+    "overrides": {
+        "@nestjs/platform-express": {
+            "multer": "2.5.0"
+        },
+        "@nestjs/swagger": {
+            "js-yaml": "5.4.1"
+        }
     }
-  },
-  "jest": {
-    "moduleFileExtensions": [
-      "js",
-      "json",
-      "ts"
-    ],
-    "rootDir": "src",
-    "testRegex": ".*\\.spec\\.ts$",
-    "transform": {
-      "^.+\\.(t|j)s$": "ts-jest"
-    },
-    "collectCoverageFrom": [
-      "**/*.(t|j)s"
-    ],
-    "coverageDirectory": "../coverage",
-    "testEnvironment": "node"
-  }
 }
