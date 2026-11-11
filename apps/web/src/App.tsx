@@ -1,4 +1,4 @@
-
+import { Button } from '@/components/ui/button'
 const roles = [
   {
     name: 'System Administrator',
@@ -47,9 +47,14 @@ function App() {
               <p className="mt-2 text-sm leading-6 text-slate-500">
                 {role.description}
               </p>
+
+              <div className="mt-8 flex justify-center gap-3">
+                <Button>Get Started</Button>
+                <Button variant="outline">Learn More</Button>
+              </div>
             </div>
           ))}
-        </div>  
+        </div>
       </div>
     </main>
   )
