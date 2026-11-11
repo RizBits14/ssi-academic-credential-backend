@@ -22,7 +22,7 @@ const roles = [
   },
 ]
 
-function App() {
+function HomePage() {
   return (
     <main className="min-h-screen bg-slate-50 px-4 py-16 sm:px-8">
       <div className="mx-auto max-w-5xl">
@@ -60,4 +60,4 @@ function App() {
   )
 }
 
-export default App
+export default HomePage

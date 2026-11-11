@@ -1,30 +1,46 @@
 
 import { Link, Route, Routes } from 'react-router'
-import App from '../App'
+import HomePage from '@/pages/public/HomePage'
+import PublicLayout from '@/layouts/PublicLayout'
+import DashboardLayout from '@/layouts/DashboardLayout'
 
 type PlaceholderPageProps = {
     title: string
+    dashboard?: boolean
 }
 
-function PlaceholderPage({ title }: PlaceholderPageProps) {
-    return (
-        <main className="flex min-h-screen flex-col items-center justify-center bg-slate-50 px-4">
-            <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-8 text-center shadow-sm">
-                <h1 className="text-2xl font-semibold text-slate-900">
-                    {title}
-                </h1>
+function PlaceholderPage({
+    title,
+    dashboard = false,
+}: PlaceholderPageProps) {
+    const content = (
+        <div className="w-full rounded-xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
+            <h1 className="text-2xl font-semibold text-slate-900">
+                {title}
+            </h1>
 
-                <p className="mt-3 text-sm text-slate-500">
-                    This page will be implemented in an upcoming checkpoint.
-                </p>
+            <p className="mt-3 text-sm text-slate-500">
+                This page will be implemented in an upcoming checkpoint.
+            </p>
 
+            {!dashboard && (
                 <Link
                     to="/"
                     className="mt-6 inline-block text-sm font-medium text-slate-700 underline underline-offset-4"
                 >
                     Back to Home
                 </Link>
-            </div>
+            )}
+        </div>
+    )
+
+    if (dashboard) {
+        return <div className="max-w-3xl">{content}</div>
+    }
+
+    return (
+        <main className="flex min-h-[calc(100vh-4rem)] items-center justify-center bg-slate-50 px-4 py-8">
+            <div className="w-full max-w-md">{content}</div>
         </main>
     )
 }
@@ -32,32 +48,73 @@ function PlaceholderPage({ title }: PlaceholderPageProps) {
 export default function AppRoutes() {
     return (
         <Routes>
-            <Route path="/" element={<App />} />
+            <Route element={<PublicLayout />}>
+                <Route path="/" element={<HomePage />} />
+                <Route
+                    path="/login"
+                    element={<PlaceholderPage title="Login" />}
+                />
+            </Route>
 
             <Route
-                path="/login"
-                element={<PlaceholderPage title="Login" />}
-            />
+                path="/admin"
+                element={<DashboardLayout role="system" />}
+            >
+                <Route
+                    path="dashboard"
+                    element={
+                        <PlaceholderPage
+                            title="System Administrator Dashboard"
+                            dashboard
+                        />
+                    }
+                />
+            </Route>
 
             <Route
-                path="/admin/dashboard"
-                element={<PlaceholderPage title="System Administrator Dashboard" />}
-            />
+                path="/university"
+                element={<DashboardLayout role="university" />}
+            >
+                <Route
+                    path="dashboard"
+                    element={
+                        <PlaceholderPage
+                            title="University Dashboard"
+                            dashboard
+                        />
+                    }
+                />
+            </Route>
 
             <Route
-                path="/university/dashboard"
-                element={<PlaceholderPage title="University Dashboard" />}
-            />
+                path="/bank"
+                element={<DashboardLayout role="bank" />}
+            >
+                <Route
+                    path="dashboard"
+                    element={
+                        <PlaceholderPage
+                            title="Bank Dashboard"
+                            dashboard
+                        />
+                    }
+                />
+            </Route>
 
             <Route
-                path="/bank/dashboard"
-                element={<PlaceholderPage title="Bank Dashboard" />}
-            />
-
-            <Route
-                path="/holder/dashboard"
-                element={<PlaceholderPage title="Credential Holder Dashboard" />}
-            />
+                path="/holder"
+                element={<DashboardLayout role="holder" />}
+            >
+                <Route
+                    path="dashboard"
+                    element={
+                        <PlaceholderPage
+                            title="Credential Holder Dashboard"
+                            dashboard
+                        />
+                    }
+                />
+            </Route>
 
             <Route
                 path="*"
