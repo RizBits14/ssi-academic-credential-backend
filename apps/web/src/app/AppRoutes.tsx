@@ -3,6 +3,8 @@ import { Link, Route, Routes } from 'react-router'
 import HomePage from '@/pages/public/HomePage'
 import PublicLayout from '@/layouts/PublicLayout'
 import DashboardLayout from '@/layouts/DashboardLayout'
+import RequireRole from '@/features/auth/components/RequireRole'
+import LoginPage from '@/pages/public/LoginPage'
 
 type PlaceholderPageProps = {
     title: string
@@ -50,70 +52,75 @@ export default function AppRoutes() {
         <Routes>
             <Route element={<PublicLayout />}>
                 <Route path="/" element={<HomePage />} />
-                <Route
-                    path="/login"
-                    element={<PlaceholderPage title="Login" />}
-                />
+                <Route path="/login" element={<LoginPage />} />
             </Route>
 
-            <Route
-                path="/admin"
-                element={<DashboardLayout role="system" />}
-            >
+            <Route element={<RequireRole role="SYSTEM_ADMIN" />}>
                 <Route
-                    path="dashboard"
-                    element={
-                        <PlaceholderPage
-                            title="System Administrator Dashboard"
-                            dashboard
-                        />
-                    }
-                />
+                    path="/admin"
+                    element={<DashboardLayout role="system" />}
+                >
+                    <Route
+                        path="dashboard"
+                        element={
+                            <PlaceholderPage
+                                title="System Administrator Dashboard"
+                                dashboard
+                            />
+                        }
+                    />
+                </Route>
             </Route>
 
-            <Route
-                path="/university"
-                element={<DashboardLayout role="university" />}
-            >
+            <Route element={<RequireRole role="ISSUER_ADMIN" />}>
                 <Route
-                    path="dashboard"
-                    element={
-                        <PlaceholderPage
-                            title="University Dashboard"
-                            dashboard
-                        />
-                    }
-                />
+                    path="/university"
+                    element={<DashboardLayout role="university" />}
+                >
+                    <Route
+                        path="dashboard"
+                        element={
+                            <PlaceholderPage
+                                title="University Dashboard"
+                                dashboard
+                            />
+                        }
+                    />
+                </Route>
             </Route>
 
-            <Route
-                path="/bank"
-                element={<DashboardLayout role="bank" />}
-            >
+            <Route element={<RequireRole role="VERIFIER_ADMIN" />}>
                 <Route
-                    path="dashboard"
-                    element={
-                        <PlaceholderPage
-                            title="Bank Dashboard"
-                            dashboard
-                        />
-                    }
-                />
+                    path="/bank"
+                    element={<DashboardLayout role="bank" />}
+                >
+                    <Route
+                        path="dashboard"
+                        element={
+                            <PlaceholderPage
+                                title="Bank Dashboard"
+                                dashboard
+                            />
+                        }
+                    />
+                </Route>
             </Route>
 
-            <Route
-                path="/holder"
-                element={<DashboardLayout role="holder" />}
-            >
+            <Route element={<RequireRole role="HOLDER" />}>
                 <Route
-                    path="dashboard"
-                    element={
-                        <PlaceholderPage
-                            title="Credential Holder Dashboard"
-                            dashboard
-                        />
-                    }
-                />
+                    path="/holder"
+                    element={<DashboardLayout role="holder" />}
+                >
+                    <Route
+                        path="dashboard"
+                        element={
+                            <PlaceholderPage
+                                title="Credential Holder Dashboard"
+                                dashboard
+                            />
+                        }
+                    />
+                </Route>
             </Route>
 
             <Route
