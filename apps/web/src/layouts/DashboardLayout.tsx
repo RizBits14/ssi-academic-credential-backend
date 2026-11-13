@@ -1,13 +1,17 @@
 
-import { Link, NavLink, Outlet } from 'react-router'
+import { useState } from 'react'
+import { Link, NavLink, Outlet, useNavigate } from 'react-router'
 import {
     ArrowLeft,
     Building2,
     GraduationCap,
     LayoutDashboard,
+    LogOut,
     ShieldCheck,
     Wallet,
 } from 'lucide-react'
+
+import { useAuth } from '@/features/hooks/useAuth'
 
 type DashboardRole = 'system' | 'university' | 'bank' | 'holder'
 
@@ -48,10 +52,32 @@ export default function DashboardLayout({
     const config = roleConfig[role]
     const RoleIcon = config.icon
 
+    const navigate = useNavigate()
+    const { logout } = useAuth()
+
+    const [isSigningOut, setIsSigningOut] = useState(false)
+
+    async function handleSignOut() {
+        if (isSigningOut) return
+
+        setIsSigningOut(true)
+
+        try {
+            await logout()
+        } catch {
+            console.warn(
+                'Server-side session revocation could not be confirmed.',
+            )
+        } finally {
+            setIsSigningOut(false)
+            navigate('/login', { replace: true })
+        }
+    }
+
     return (
         <div className="min-h-screen bg-slate-50 text-slate-900">
             <header className="border-b border-slate-200 bg-white">
-                <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-4 px-4 sm:px-6">
+                <div className="mx-auto flex min-h-16 max-w-7xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
                     <div className="flex min-w-0 items-center gap-3">
                         <div
                             className={`flex size-10 shrink-0 items-center justify-center rounded-xl text-white ${config.accent}`}
@@ -63,20 +89,39 @@ export default function DashboardLayout({
                             <p className="truncate text-sm font-semibold">
                                 SSI Credential Platform
                             </p>
+
                             <p className="truncate text-xs text-slate-500">
                                 {config.title}
                             </p>
                         </div>
                     </div>
 
-                    <Link
-                        to="/"
-                        className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium transition-colors hover:bg-slate-100"
-                    >
-                        <ArrowLeft className="size-4" />
-                        <span className="hidden sm:inline">Back to Home</span>
-                        <span className="sm:hidden">Home</span>
-                    </Link>
+                    <div className="flex shrink-0 items-center gap-2">
+                        <Link
+                            to="/"
+                            aria-label="Back to Home"
+                            className="inline-flex h-9 cursor-pointer items-center justify-center gap-2 rounded-lg border border-slate-200 px-2.5 text-sm font-medium transition-colors hover:bg-slate-100 sm:px-3"
+                        >
+                            <ArrowLeft className="size-4" />
+                            <span className="hidden sm:inline">
+                                Back to Home
+                            </span>
+                        </Link>
+
+                        <button
+                            type="button"
+                            onClick={handleSignOut}
+                            disabled={isSigningOut}
+                            aria-label="Sign Out"
+                            className="inline-flex h-9 cursor-pointer items-center justify-center gap-2 rounded-lg border border-red-200 bg-white px-2.5 text-sm font-medium text-red-700 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 sm:px-3"
+                        >
+                            <LogOut className="size-4" />
+
+                            <span className="hidden sm:inline">
+                                {isSigningOut ? 'Signing Out...' : 'Sign Out'}
+                            </span>
+                        </button>
+                    </div>
                 </div>
             </header>
 
@@ -91,7 +136,7 @@ export default function DashboardLayout({
                             to={config.path}
                             end
                             className={({ isActive }) =>
-                                `flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${isActive
+                                `flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${isActive
                                     ? 'bg-slate-100 text-slate-900'
                                     : 'text-slate-600 hover:bg-slate-50'
                                 }`
