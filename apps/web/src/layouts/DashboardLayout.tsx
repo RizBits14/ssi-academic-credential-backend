@@ -10,6 +10,7 @@ import {
     ShieldCheck,
     Wallet,
 } from 'lucide-react'
+import AccountIdentityCard from '@/features/auth/components/AccountIdentityCard'
 
 import { useAuth } from '@/features/hooks/useAuth'
 
@@ -149,6 +150,7 @@ export default function DashboardLayout({
                 </aside>
 
                 <main className="min-w-0 flex-1 p-4 sm:p-6 lg:p-8">
+                    <AccountIdentityCard />
                     <Outlet />
                 </main>
             </div>

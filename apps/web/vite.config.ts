@@ -1,5 +1,5 @@
 
-import { defineConfig } from 'vite'
+import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { fileURLToPath } from 'node:url'
@@ -14,5 +14,9 @@ export default defineConfig({
   server: {
     port: 3001,
     strictPort: true,
+  },
+  test: {
+    environment: 'jsdom',
+    clearMocks: true,
   },
 })

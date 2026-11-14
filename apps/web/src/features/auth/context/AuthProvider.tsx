@@ -92,14 +92,14 @@ export default function AuthProvider({
     )
 
     const getAccessToken = useCallback(
-        async (): Promise<string | null> => {
+        async (forceRefresh = false): Promise<string | null> => {
             const currentTokens = tokensRef.current
 
             if (!currentTokens) {
                 return null
             }
 
-            if (!isTokenExpiringSoon(currentTokens.accessToken)) {
+            if (!forceRefresh && !isTokenExpiringSoon(currentTokens.accessToken)) {
                 return currentTokens.accessToken
             }
 
@@ -159,6 +159,22 @@ export default function AuthProvider({
         }
     }, [getAccessToken])
 
+
+    const invalidateSession = useCallback(
+        (expectedAccessToken: string): void => {
+            if (
+                tokensRef.current?.accessToken !== expectedAccessToken
+            ) {
+                return
+            }
+
+            sessionVersionRef.current += 1
+            tokensRef.current = null
+            setUser(null)
+        },
+        [],
+    )
+
     const contextValue = useMemo(
         () => ({
             user,
@@ -167,8 +183,16 @@ export default function AuthProvider({
             login,
             logout,
             getAccessToken,
+            invalidateSession,
         }),
-        [user, isLoading, login, logout, getAccessToken],
+        [
+            user,
+            isLoading,
+            login,
+            logout,
+            getAccessToken,
+            invalidateSession,
+        ],
     )
 
     return (

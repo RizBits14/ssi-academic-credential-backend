@@ -12,7 +12,8 @@ export interface AuthContextValue {
     isLoading: boolean
     login: (credentials: LoginRequest) => Promise<AuthUser>
     logout: () => Promise<void>
-    getAccessToken: () => Promise<string | null>
+    getAccessToken: (forceRefresh?: boolean) => Promise<string | null>
+    invalidateSession: (expectedAccessToken: string) => void
 }
 
 export const AuthContext = createContext<AuthContextValue | null>(
