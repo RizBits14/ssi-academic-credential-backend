@@ -1,4 +1,4 @@
-
+import type { UserRole } from '@/features/auth/types/auth.types'
 export type OrganizationType = 'UNIVERSITY' | 'BANK'
 
 export type OrganizationStatus =
@@ -48,4 +48,87 @@ export interface ListOrganizationsParams {
     search?: string
     type?: OrganizationType
     status?: OrganizationStatus
+}
+
+
+export interface AdminDashboardOverview {
+    organizations: {
+        total: number
+        byType: {
+            university: number
+            bank: number
+        }
+        byStatus: {
+            active: number
+            suspended: number
+            disabled: number
+        }
+    }
+
+    users: {
+        total: number
+        byRole: {
+            systemAdmin: number
+            issuerAdmin: number
+            verifierAdmin: number
+            holder: number
+        }
+    }
+
+    academicRecords: {
+        total: number
+        byStatus: {
+            active: number
+            graduated: number
+            withdrawn: number
+            invalid: number
+        }
+    }
+
+    credentials: {
+        total: number
+        byStatus: {
+            active: number
+            suspended: number
+            revoked: number
+            expired: number
+        }
+    }
+
+    trustedIssuers: {
+        total: number
+        byStatus: {
+            trusted: number
+            suspended: number
+            revoked: number
+        }
+    }
+
+    recentActivities: AdminRecentActivity[]
+}
+
+export interface AdminRecentActivity {
+    id: string
+    action: string
+    resourceType: string | null
+    resourceId: string | null
+    createdAt: string
+    actor: {
+        id: string
+        name: string
+        role: UserRole
+    } | null
+    organization: {
+        id: string
+        name: string
+        type: OrganizationType
+    } | null
+}
+
+export interface AdminDashboardResponse {
+    success: boolean
+    data: AdminDashboardOverview
+    meta: {
+        timestamp: string
+    }
 }

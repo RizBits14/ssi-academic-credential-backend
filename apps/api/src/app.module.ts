@@ -26,6 +26,7 @@ import { UsersModule } from './users/users.module';
 import { VerificationRequestsModule } from './verification-requests/verification-requests.module';
 import { VerificationModule } from './verification/verification.module';
 import { WalletModule } from './wallet/wallet.module';
+import { AdminModule } from './admin/admin.module';
 
 @Module({
   imports: [
@@ -86,6 +87,7 @@ import { WalletModule } from './wallet/wallet.module';
     RedisModule,
     HealthModule,
     AuthModule,
+    AdminModule,
     UsersModule,
     OrganizationsModule,
     CryptoModule,
