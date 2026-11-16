@@ -6,19 +6,30 @@ import type { AxiosRequestConfig } from 'axios'
 import api from '@/lib/api'
 import { useAuth } from '@/features/hooks/useAuth'
 
-interface ApiResponse<T> {
+export interface ApiEnvelope<T> {
     success: boolean
     data: T
     meta?: {
         timestamp: string
+        page?: number
+        limit?: number
+        total?: number
+        totalPages?: number
     }
+}
+
+export interface AuthenticatedRequestOptions {
+    responseMode?: 'data' | 'envelope'
 }
 
 export function useAuthenticatedRequest() {
     const { getAccessToken, invalidateSession } = useAuth()
 
     return useCallback(
-        async <T>(config: AxiosRequestConfig): Promise<T> => {
+        async <T>(
+            config: AxiosRequestConfig,
+            options: AuthenticatedRequestOptions = {},
+        ): Promise<T> => {
             const accessToken = await getAccessToken()
 
             if (!accessToken) {
@@ -26,7 +37,7 @@ export function useAuthenticatedRequest() {
             }
 
             const executeRequest = async (token: string): Promise<T> => {
-                const response = await api.request<ApiResponse<T>>({
+                const response = await api.request<ApiEnvelope<unknown>>({
                     ...config,
                     headers: {
                         ...config.headers,
@@ -34,7 +45,11 @@ export function useAuthenticatedRequest() {
                     },
                 })
 
-                return response.data.data
+                return (
+                    options.responseMode === 'envelope'
+                        ? response.data
+                        : response.data.data
+                ) as T
             }
 
             try {

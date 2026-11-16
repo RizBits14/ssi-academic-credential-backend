@@ -160,13 +160,20 @@ export class AuthService {
     }
 
     return {
-      accessToken: nextTokens.accessToken,
-      refreshToken: nextTokens.refreshToken,
+      ...nextTokens,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+      },
     };
   }
 
-  async logout(userId: string, dto: RefreshTokenDto): Promise<void> {
-    await this.refreshTokenService.revokeToken(dto.refreshToken, userId);
+  async logout(userId: string, refreshToken?: string): Promise<void> {
+    if (refreshToken) {
+      await this.refreshTokenService.revokeToken(refreshToken, userId);
+    }
 
     await this.prisma.auditLog.create({
       data: {
@@ -183,7 +190,7 @@ export class AuthService {
     email: string,
     role: UserRole,
     familyId: string,
-  ) {
+  ): Promise<TokenPair> {
     const tokens = await this.createTokenPair(userId, email, role, familyId);
 
     await this.refreshTokenService.storeToken(
@@ -193,10 +200,7 @@ export class AuthService {
       tokens.refreshTokenExpiresAt,
     );
 
-    return {
-      accessToken: tokens.accessToken,
-      refreshToken: tokens.refreshToken,
-    };
+    return tokens;
   }
 
   private async createTokenPair(

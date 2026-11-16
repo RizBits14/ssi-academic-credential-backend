@@ -5,6 +5,7 @@ import PublicLayout from '@/layouts/PublicLayout'
 import DashboardLayout from '@/layouts/DashboardLayout'
 import RequireRole from '@/features/auth/components/RequireRole'
 import LoginPage from '@/pages/public/LoginPage'
+import AdminOrganizationsPage from '@/features/admin/pages/AdminOrganizationsPage'
 
 type PlaceholderPageProps = {
     title: string
@@ -61,13 +62,8 @@ export default function AppRoutes() {
                     element={<DashboardLayout role="system" />}
                 >
                     <Route
-                        path="dashboard"
-                        element={
-                            <PlaceholderPage
-                                title="System Administrator Dashboard"
-                                dashboard
-                            />
-                        }
+                        path="organizations"
+                        element={<AdminOrganizationsPage />}
                     />
                 </Route>
             </Route>

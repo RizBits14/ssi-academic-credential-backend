@@ -147,6 +147,22 @@ export default function DashboardLayout({
                             Dashboard
                         </NavLink>
                     </nav>
+
+                    {role === 'system' && (
+                        <NavLink
+                            to="/admin/organizations"
+                            className={({ isActive }) =>
+                                `mt-1 flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${isActive
+                                    ? 'bg-violet-50 text-[#6D28D9]'
+                                    : 'text-slate-600 hover:bg-slate-50'
+                                }`
+                            }
+                        >
+                            <Building2 className="size-4" />
+                            Organizations
+                        </NavLink>
+                    )}
+
                 </aside>
 
                 <main className="min-w-0 flex-1 p-4 sm:p-6 lg:p-8">

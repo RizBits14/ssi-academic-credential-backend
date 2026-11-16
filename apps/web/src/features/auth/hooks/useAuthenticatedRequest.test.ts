@@ -117,6 +117,47 @@ describe('useAuthenticatedRequest', () => {
         )
     })
 
+
+    it('preserves the complete API envelope when requested', async () => {
+        const envelope = {
+            success: true,
+            data: [
+                {
+                    id: 'organization-1',
+                    name: 'Northbridge University',
+                },
+            ],
+            meta: {
+                page: 1,
+                limit: 10,
+                total: 1,
+                totalPages: 1,
+                timestamp: '2026-11-16T06:42:43.510Z',
+            },
+        }
+
+        requestMock.mockResolvedValueOnce({
+            data: envelope,
+        } as AxiosResponse)
+
+        const { result } = renderHook(() =>
+            useAuthenticatedRequest(),
+        )
+
+        const response = await result.current(
+            {
+                method: 'GET',
+                url: '/organizations',
+            },
+            {
+                responseMode: 'envelope',
+            },
+        )
+
+        expect(response).toEqual(envelope)
+    })
+
+
     it('refreshes and retries once after a 401 response', async () => {
         getAccessTokenMock
             .mockResolvedValueOnce('token-a')

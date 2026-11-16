@@ -2,7 +2,7 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { isAxiosError } from 'axios'
-import { Navigate, useNavigate } from 'react-router'
+import { Navigate, useLocation, useNavigate } from 'react-router'
 import { LockKeyhole, ShieldCheck } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -16,9 +16,31 @@ const dashboardRoutes: Record<UserRole, string> = {
     HOLDER: '/holder/dashboard',
 }
 
+interface LoginLocationState {
+    from?: string
+}
+
+function getRedirectPath(role: UserRole, requestedPath?: string) {
+    if (
+        typeof requestedPath === 'string' &&
+        requestedPath.startsWith('/') &&
+        !requestedPath.startsWith('//')
+    ) {
+        return requestedPath
+    }
+
+    return dashboardRoutes[role]
+}
+
 export default function LoginPage() {
     const navigate = useNavigate()
+    const location = useLocation()
     const { user, login } = useAuth()
+
+    const navigationState =
+        location.state as LoginLocationState | null
+
+    const requestedPath = navigationState?.from
 
     const [email, setEmail] = useState('')
     const [password, setPassword] = useState('')
@@ -41,9 +63,10 @@ export default function LoginPage() {
                 password,
             })
 
-            navigate(dashboardRoutes[authenticatedUser.role], {
-                replace: true,
-            })
+            navigate(
+                getRedirectPath(authenticatedUser.role, requestedPath),
+                { replace: true },
+            )
         } catch (error) {
             if (isAxiosError(error) && error.response?.status === 401) {
                 setErrorMessage('Invalid email or password.')
@@ -60,7 +83,7 @@ export default function LoginPage() {
     if (user) {
         return (
             <Navigate
-                to={dashboardRoutes[user.role]}
+                to={getRedirectPath(user.role, requestedPath)}
                 replace
             />
         )

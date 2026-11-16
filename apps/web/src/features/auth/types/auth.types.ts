@@ -17,20 +17,14 @@ export interface LoginRequest {
     password: string
 }
 
-export interface AuthTokens {
+export interface AuthSessionResponse {
     accessToken: string
-    refreshToken: string
-}
-
-export interface LoginResponse extends AuthTokens {
     user: AuthUser
 }
 
-export interface RefreshTokenRequest {
-    refreshToken: string
-}
+export type LoginResponse = AuthSessionResponse
 
-export type RefreshTokenResponse = AuthTokens
+export type RefreshTokenResponse = AuthSessionResponse
 
 export interface CurrentUserResponse {
     sub: string

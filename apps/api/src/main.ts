@@ -5,6 +5,7 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { Logger } from 'nestjs-pino';
+import cookieParser from 'cookie-parser';
 
 import { AppModule } from './app.module';
 
@@ -35,6 +36,8 @@ async function bootstrap() {
       contentSecurityPolicy: false,
     }),
   );
+
+  app.use(cookieParser());
 
   const allowedOrigins = corsOrigin
     .split(',')

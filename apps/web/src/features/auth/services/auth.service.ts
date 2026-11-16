@@ -26,10 +26,9 @@ export const authService = {
         return response.data.data
     },
 
-    async refresh(refreshToken: string): Promise<RefreshTokenResponse> {
+    async refresh(): Promise<RefreshTokenResponse> {
         const response = await api.post<ApiResponse<RefreshTokenResponse>>(
             '/auth/refresh',
-            { refreshToken },
         )
 
         return response.data.data
@@ -50,13 +49,10 @@ export const authService = {
         return response.data.data
     },
 
-    async logout(
-        accessToken: string,
-        refreshToken: string,
-    ): Promise<void> {
+    async logout(accessToken: string): Promise<void> {
         await api.post(
             '/auth/logout',
-            { refreshToken },
+            undefined,
             {
                 headers: {
                     Authorization: `Bearer ${accessToken}`,
