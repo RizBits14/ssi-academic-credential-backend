@@ -27,6 +27,7 @@ import { VerificationRequestsModule } from './verification-requests/verification
 import { VerificationModule } from './verification/verification.module';
 import { WalletModule } from './wallet/wallet.module';
 import { AdminModule } from './admin/admin.module';
+import { AdminUsersModule } from './users/admin-users.module';
 
 @Module({
   imports: [
@@ -89,6 +90,7 @@ import { AdminModule } from './admin/admin.module';
     AuthModule,
     AdminModule,
     UsersModule,
+    AdminUsersModule,
     OrganizationsModule,
     CryptoModule,
     DidModule,
