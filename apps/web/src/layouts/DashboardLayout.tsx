@@ -1,4 +1,3 @@
-
 import { useState } from 'react'
 import { Link, NavLink, Outlet, useNavigate } from 'react-router'
 import {
@@ -8,15 +7,16 @@ import {
     LayoutDashboard,
     LogOut,
     ShieldCheck,
+    Users,
     Wallet,
 } from 'lucide-react'
-import AccountIdentityCard from '@/features/auth/components/AccountIdentityCard'
 
+import AccountIdentityCard from '@/features/auth/components/AccountIdentityCard'
 import { useAuth } from '@/features/hooks/useAuth'
 
 type DashboardRole = 'system' | 'university' | 'bank' | 'holder'
 
-type DashboardLayoutProps = {
+interface DashboardLayoutProps {
     role: DashboardRole
 }
 
@@ -47,6 +47,12 @@ const roleConfig = {
     },
 }
 
+const navigationStyles = (isActive: boolean) =>
+    `flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${isActive
+        ? 'bg-violet-50 text-[#6D28D9]'
+        : 'text-slate-600 hover:bg-slate-50'
+    }`
+
 export default function DashboardLayout({
     role,
 }: DashboardLayoutProps) {
@@ -59,7 +65,9 @@ export default function DashboardLayout({
     const [isSigningOut, setIsSigningOut] = useState(false)
 
     async function handleSignOut() {
-        if (isSigningOut) return
+        if (isSigningOut) {
+            return
+        }
 
         setIsSigningOut(true)
 
@@ -104,6 +112,7 @@ export default function DashboardLayout({
                             className="inline-flex h-9 cursor-pointer items-center justify-center gap-2 rounded-lg border border-slate-200 px-2.5 text-sm font-medium transition-colors hover:bg-slate-100 sm:px-3"
                         >
                             <ArrowLeft className="size-4" />
+
                             <span className="hidden sm:inline">
                                 Back to Home
                             </span>
@@ -119,7 +128,9 @@ export default function DashboardLayout({
                             <LogOut className="size-4" />
 
                             <span className="hidden sm:inline">
-                                {isSigningOut ? 'Signing Out...' : 'Sign Out'}
+                                {isSigningOut
+                                    ? 'Signing Out...'
+                                    : 'Sign Out'}
                             </span>
                         </button>
                     </div>
@@ -132,37 +143,45 @@ export default function DashboardLayout({
                         Workspace
                     </p>
 
-                    <nav aria-label="Dashboard navigation">
+                    <nav
+                        aria-label="Dashboard navigation"
+                        className="space-y-1"
+                    >
                         <NavLink
                             to={config.path}
                             end
                             className={({ isActive }) =>
-                                `flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${isActive
-                                    ? 'bg-slate-100 text-slate-900'
-                                    : 'text-slate-600 hover:bg-slate-50'
-                                }`
+                                navigationStyles(isActive)
                             }
                         >
                             <LayoutDashboard className="size-4" />
                             Dashboard
                         </NavLink>
+
+                        {role === 'system' && (
+                            <>
+                                <NavLink
+                                    to="/admin/organizations"
+                                    className={({ isActive }) =>
+                                        navigationStyles(isActive)
+                                    }
+                                >
+                                    <Building2 className="size-4" />
+                                    Organizations
+                                </NavLink>
+
+                                <NavLink
+                                    to="/admin/users"
+                                    className={({ isActive }) =>
+                                        navigationStyles(isActive)
+                                    }
+                                >
+                                    <Users className="size-4" />
+                                    Users
+                                </NavLink>
+                            </>
+                        )}
                     </nav>
-
-                    {role === 'system' && (
-                        <NavLink
-                            to="/admin/organizations"
-                            className={({ isActive }) =>
-                                `mt-1 flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${isActive
-                                    ? 'bg-violet-50 text-[#6D28D9]'
-                                    : 'text-slate-600 hover:bg-slate-50'
-                                }`
-                            }
-                        >
-                            <Building2 className="size-4" />
-                            Organizations
-                        </NavLink>
-                    )}
-
                 </aside>
 
                 <main className="min-w-0 flex-1 p-4 sm:p-6 lg:p-8">

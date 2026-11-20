@@ -7,6 +7,7 @@ import RequireRole from '@/features/auth/components/RequireRole'
 import LoginPage from '@/pages/public/LoginPage'
 import AdminOrganizationsPage from '@/features/admin/pages/AdminOrganizationsPage'
 import AdminDashboardPage from '@/features/admin/pages/AdminDashboardPage'
+import AdminUsersPage from '@/features/admin/pages/AdminUsersPage'
 
 type PlaceholderPageProps = {
     title: string
@@ -69,6 +70,10 @@ export default function AppRoutes() {
                     <Route
                         path="organizations"
                         element={<AdminOrganizationsPage />}
+                    />
+                    <Route
+                        path="users"
+                        element={<AdminUsersPage />}
                     />
                 </Route>
             </Route>
