@@ -9,6 +9,7 @@ import AdminOrganizationsPage from '@/features/admin/pages/AdminOrganizationsPag
 import AdminDashboardPage from '@/features/admin/pages/AdminDashboardPage'
 import AdminUsersPage from '@/features/admin/pages/AdminUsersPage'
 import AdminTrustRegistryPage from '@/features/admin/pages/AdminTrustRegistryPage'
+import AdminAuditLogsPage from '@/features/admin/pages/AdminAuditLogsPage'
 
 type PlaceholderPageProps = {
     title: string
@@ -68,17 +69,25 @@ export default function AppRoutes() {
                         path="dashboard"
                         element={<AdminDashboardPage />}
                     />
+
                     <Route
                         path="organizations"
                         element={<AdminOrganizationsPage />}
                     />
+
                     <Route
                         path="users"
                         element={<AdminUsersPage />}
                     />
+
                     <Route
                         path="trust-registry"
                         element={<AdminTrustRegistryPage />}
+                    />
+
+                    <Route
+                        path="audit-logs"
+                        element={<AdminAuditLogsPage />}
                     />
                 </Route>
             </Route>

@@ -4,6 +4,7 @@ import {
     ArrowLeft,
     Building2,
     GraduationCap,
+    History,
     LayoutDashboard,
     LogOut,
     ShieldCheck,
@@ -188,6 +189,16 @@ export default function DashboardLayout({
                                 >
                                     <ShieldCheck className="size-4" />
                                     Trust Registry
+                                </NavLink>
+
+                                <NavLink
+                                    to="/admin/audit-logs"
+                                    className={({ isActive }) =>
+                                        navigationStyles(isActive)
+                                    }
+                                >
+                                    <History className="size-4" />
+                                    Audit Logs
                                 </NavLink>
                             </>
                         )}
