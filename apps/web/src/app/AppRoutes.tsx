@@ -8,6 +8,7 @@ import LoginPage from '@/pages/public/LoginPage'
 import AdminOrganizationsPage from '@/features/admin/pages/AdminOrganizationsPage'
 import AdminDashboardPage from '@/features/admin/pages/AdminDashboardPage'
 import AdminUsersPage from '@/features/admin/pages/AdminUsersPage'
+import AdminTrustRegistryPage from '@/features/admin/pages/AdminTrustRegistryPage'
 
 type PlaceholderPageProps = {
     title: string
@@ -74,6 +75,10 @@ export default function AppRoutes() {
                     <Route
                         path="users"
                         element={<AdminUsersPage />}
+                    />
+                    <Route
+                        path="trust-registry"
+                        element={<AdminTrustRegistryPage />}
                     />
                 </Route>
             </Route>

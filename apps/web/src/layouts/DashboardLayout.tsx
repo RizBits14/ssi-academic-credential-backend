@@ -179,6 +179,16 @@ export default function DashboardLayout({
                                     <Users className="size-4" />
                                     Users
                                 </NavLink>
+
+                                <NavLink
+                                    to="/admin/trust-registry"
+                                    className={({ isActive }) =>
+                                        navigationStyles(isActive)
+                                    }
+                                >
+                                    <ShieldCheck className="size-4" />
+                                    Trust Registry
+                                </NavLink>
                             </>
                         )}
                     </nav>
